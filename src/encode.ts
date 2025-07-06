@@ -306,10 +306,10 @@ export class JPEncode<ContextType = undefined> extends JPBase {
     };
 
     private doEncode(valueWriter:BiWriter|BiWriterStream, object: unknown, depth: number) {
-        if (object == undefined) {
-            return this.encodeUndefined(valueWriter);
-        } else if (object == null) {
+        if (object === null) {
             return this.encodeNil(valueWriter);
+        } else if (object === undefined) {
+            return this.encodeUndefined(valueWriter);
         } else if (typeof object === "boolean") {
             return this.encodeBoolean(valueWriter, object);
         } else if (typeof object === "number") {
@@ -1046,7 +1046,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
                 valueWriter.ubyte  = JPExtType.Date;
 
-                valueWriter.uint32 = sec;
+                valueWriter.uint32 = sec >>> 0;
 
                 return 7;
             } else {
@@ -1058,9 +1058,9 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
                 const secLow = sec & 0xffffffff;
                 // nsec30 | secHigh2
-                valueWriter.uint32 = (nsec << 2) | (secHigh & 0x3);
+                valueWriter.uint32 = ((nsec << 2) | (secHigh & 0x3)) >>> 0;
                 // secLow32
-                valueWriter.uint32 = secLow;
+                valueWriter.uint32 = secLow >>> 0;
 
                 return 11;
             }
@@ -1070,7 +1070,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             valueWriter.ubyte  = JPExtType.Date;
 
-            valueWriter.uint32 = nsec;
+            valueWriter.uint32 = nsec >>> 0;
 
             valueWriter.int64 = sec;
 

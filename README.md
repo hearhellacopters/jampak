@@ -27,7 +27,7 @@ const object = {
   object: { foo: "bar" },
   setExt: new Set([50, 60, 70]),
   mapExt: new Map([["key1","data1"],["key2","data2"]]),
-  symbolExt: new Symbol("symbol"),
+  symbolExt: Symbol("symbol"),
   uint8arrayExt: new Uint8Array([1, 2, 3]),
   dateExt: new Date()
 };
@@ -412,7 +412,7 @@ The following are built in types that JamPak works with. Users can add their own
 | --------------------------------- | -------------------- | --------------------- |
 | Map                               | 0xEE                 | Just like `Object` but the keys here are expanded. The size value here are the length of the map, not the buffer. |
 | Set                               | 0xEF                 | Like an `Array` but with a unique list. The size value here are the size of the set, not the buffer. |
-| Symbol                            | 0xF0                 | Has a fixed boolean and string. Any generated symbol can also be found in the array `symbolList` object from the `JPDecode` class.                |
+| Symbol                            | 0xF0                 | Has a fixed boolean and string. Any generated symbol can also be found in the array `symbolList` object from the `JPDecode` class. Note: symbols used as keys can't encode as the reason for those use cases is to conceal the data.   |
 | RegEx                             | 0xF1                 | Has two strings. Creates `new RegExp()`          |
 | `TypedArray`                      | 0xF2 - 0xFD          | `BigUint64Array` to `Uint8ClampedArray `          |
 | Buffer                            | 0xFE                 | Node default `Buffer`                |

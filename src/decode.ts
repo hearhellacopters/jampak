@@ -823,7 +823,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             } else if (headByte === JPType.UINT_64) {
                 object = br.uint64; 
                 if(this.enforceBigInt){
-                     object = BigInt(object as number);
+                    object = BigInt(object as number);
                 }
             } else if (headByte === JPType.INT_8) {
                 object = br.int8;
@@ -834,7 +834,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             } else if (headByte === JPType.INT_64) {
                 object = br.int64; 
                 if(this.enforceBigInt){
-                     object = BigInt(object as number);
+                    object = BigInt(object as number);
                 }
             } else if (headByte <= JPType.KEY32) {
                 // nonfix key
@@ -1212,7 +1212,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 switch (br.size) {
                     case 4: {
                         // timestamp 32 = { sec32 }
-                        const sec = br.uint32le;
+                        const sec = br.uint32;
 
                         const nsec = 0;
 
@@ -1222,9 +1222,9 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     }
                     case 8: {
                         // timestamp 64 = { nsec30, sec34 }
-                        const nsec30AndSecHigh2 = br.uint32le;
+                        const nsec30AndSecHigh2 = br.uint32;
 
-                        const secLow32 = br.uint32le;
+                        const secLow32 = br.uint32;
 
                         const sec = (nsec30AndSecHigh2 & 0x3) * 0x100000000 + secLow32;
 
@@ -1236,9 +1236,9 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     }
                     case 12: {
                         // timestamp 96 = { nsec32 (unsigned), sec64 (signed) }
-                        const nsec = br.uint32le;
+                        const nsec = br.uint32;
                         
-                        const sec = Number(br.int64le);
+                        const sec = Number(br.int64);
 
                         retValue = new Date(sec * 1e3 + nsec / 1e6);
                     }

@@ -17,6 +17,9 @@ import {
     ContextOf
 } from './common.js';
 
+/**
+ * Options for `JPDecode`
+ */
 export type DecoderOptions<ContextType = undefined> = Readonly<
     Partial<{
         /**
@@ -38,10 +41,12 @@ export type DecoderOptions<ContextType = undefined> = Readonly<
          * If the key was stripped from the file, this number MUST be passed to decoder for the file to be decoded.
          */
         encryptionKey?: number;
+
         /**
          * This ensures all 64 bit values return as `bigint`
          */
         enforceBigInt?: boolean;
+
         /**
          * Forces the decoder to only return only a valid JSON object.
          * 
@@ -277,6 +282,9 @@ class StackPool {
     };
 };
 
+/**
+ * Create with `DecoderOptions`
+ */
 export class JPDecode<ContextType = undefined> extends JPBase {
     private readonly extensionCodec: JPExtensionCodecType<ContextType>;
 
@@ -323,6 +331,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
      */
     hasExtensions = false;
 
+    /**
+     * Set up with basic options.
+     * 
+     * @param {DecoderOptions?} options - options for decoding
+     */
     constructor(options?: DecoderOptions<ContextType>) {
         super();
 
@@ -351,6 +364,8 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             EncryptionKey: this.encryptionKey,
 
             fileName: this.fileName,
+
+            enforceBigInt: this.enforceBigInt,
 
             makeJSON: this.makeJSON,
             // TODO may need more

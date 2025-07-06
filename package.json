@@ -1,6 +1,6 @@
 {
     "name": "jampak",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "JamPak file Encoder and Decoder",
     "type": "module",
     "module": "./dist/index.esm.js",

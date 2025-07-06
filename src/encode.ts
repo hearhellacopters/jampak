@@ -21,7 +21,10 @@ import {
     ContextOf
 } from './common.js';
 
-type encodeOptions<ContextType = undefined> = Partial<
+/**
+ * Options for `JPEncode`
+ */
+export type EncoderOptions<ContextType = undefined> = Partial<
     Readonly<{
         extensionCodec?: JPExtensionCodecType<ContextType>;
         context?: ContextType;
@@ -31,6 +34,7 @@ type encodeOptions<ContextType = undefined> = Partial<
          * Defaults to `little`.
          */
         endian?: endian;
+
         /**
          * If you want the file Buffer to be encrypted.
          * 
@@ -47,6 +51,7 @@ type encodeOptions<ContextType = undefined> = Partial<
          * Defaults to `false`.
          */
         encrypt?: boolean;
+
         /**
          * You can set your own 32 bit encryption key.
          * 
@@ -55,6 +60,7 @@ type encodeOptions<ContextType = undefined> = Partial<
          * Will be randomly assigned otherwise.
          */
         encryptionKey?: uint32;
+
         /**
          * Will remove the encryption key from the file.
          * 
@@ -63,6 +69,7 @@ type encodeOptions<ContextType = undefined> = Partial<
          * Defaults to `false`.
          */
         stripEncryptKey?: boolean;
+
         /**
          * Include a CRC32 hash check on the file. Hash is included in the file.
          * 
@@ -71,6 +78,7 @@ type encodeOptions<ContextType = undefined> = Partial<
          * Defaults to `false`.
          */
         CRC32?: boolean;
+
         /**
          * Can futher decrease the file size with zlib.
          * 
@@ -79,6 +87,7 @@ type encodeOptions<ContextType = undefined> = Partial<
          * Defaults to `false`.
          */
         compress?: boolean;
+
         /**
          * For extra security you can strip all object keys from the data creating a "schema" like file.
          * 
@@ -92,7 +101,7 @@ type encodeOptions<ContextType = undefined> = Partial<
     ContextOf<ContextType>;
 
 /**
- * 
+ * Create with `EncoderOptions`
  */
 export class JPEncode<ContextType = undefined> extends JPBase {
     private readonly extensionCodec: JPExtensionCodecType<ContextType>;
@@ -131,8 +140,14 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return VERSION_MINOR;
     };
 
-    constructor(encodeOptions?: encodeOptions<ContextType>) {
+    /**
+     * Set up with basic options
+     * 
+     * @param {EncoderOptions?} encodeOptions - options for encoding
+     */
+    constructor(encodeOptions?: EncoderOptions<ContextType>) {
         super();
+
         this.extensionCodec = encodeOptions?.extensionCodec ?? (JPExtensionCodec.defaultCodec as JPExtensionCodecType<ContextType>);
 
         this.context = (encodeOptions as { context: ContextType } | undefined)?.context as ContextType; // needs a type assertion because EncoderOptions has no context property when ContextType is undefined

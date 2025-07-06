@@ -1,5 +1,5 @@
-export { JPDecode } from './decode.js';
-export { JPEncode } from './encode.js';
+export { JPDecode, DecoderOptions } from './decode.js';
+export { JPEncode, EncoderOptions } from './encode.js';
 export {
     JPExtensionType,
     JPExtensionCodec,

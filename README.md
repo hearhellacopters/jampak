@@ -56,6 +56,7 @@ const encoded: Buffer = encoder.encode(object);
   - [JamPak Mapping Table](#JamPak-mapping-table)
   - [JamPak Extension Table](#JamPak-extension-table)
 - [Prerequisites](#prerequisites)
+- [Binary template](#binary-template)
 - [License](#license)
 
 ## Install
@@ -420,6 +421,10 @@ The following are built in types that JamPak works with. Users can add their own
 ## Prerequisites
 
 This is a universal JavaScript library that supports only NodeJS. NodeJS v18 is required.
+
+## Binary template
+
+For a full understanding of the file structure, the most up-to-date JAMPAK.bt binary template can be found [here](https://github.com/hearhellacopters/jampak/blob/main/JAMPAK.bt).
 
 ## License
 

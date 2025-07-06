@@ -1,6 +1,12 @@
 # JamPak for Node/JavaScript/TypeScript
 
-**JamPak** is an efficient file storage solution specifically made for both JavaScript and TypeScript data types in Node.js with a focus on accuracy, expandability, security, and performance. Includes compact storeage of all JSON types as well as TypedArrays, Maps, Sets, Dates, Symbols and more! This library uses a heavily modified implementation of **MessagePack** to improve storage size and create efficient binary serialization. It includes additional advanced features such as encryption, compression, key stripping and hashing.
+**JamPak** is an efficient file storage solution specifically made for both JavaScript and TypeScript data types in Node.js with a focus on accuracy, expandability, security, and performance. Includes compact storeage of all JSON types as well as TypedArrays, Maps, Sets, Dates, Symbols and more! This library uses a heavily modified implementation of **MessagePack** to improve storage size and create efficient binary serialization. 
+
+**JamPak** improvements over MessagePack:
+ - Reduced file size by spliting data into two sections, values and strings
+ - Keys can be stripped for 'schemas' like control to futher reduce file size
+ - Compression / Encryption / CRC check
+ - Endianness control
 
 ***Note: Only compatible with Node.js.**
 
@@ -52,6 +58,7 @@ const encoded: Buffer = encoder.encode(object);
     - [Class `JPDecode` objects](#class-jpdecode-objects)
 - [Extension Types](#extension-types)
   - [ExtensionCodec context](#extensioncodec-context)
+- [Advanced Features](#advanced-features)
 - [JamPak Specification](#JamPak-specification)
   - [JamPak Mapping Table](#JamPak-mapping-table)
   - [JamPak Extension Table](#JamPak-extension-table)
@@ -366,6 +373,22 @@ const decoder = new JPEncode({ extensionCodec: ExtCodec, context: context });
 
 const decoded = decoder. decode(encoded);
 ```
+
+## Advanced Features
+
+**JamPak** has four major features: encryption, compression, key stripping and CRC check.
+
+- `encrypt`
+  - Outside of the 32 byte header, all data is encrypted with either a random 32 bit number or one you supplied with `encryptionKey` before encoding. The value is **NOT** the key, but a sead for a RNG that picks one of 3 different encryption setups and generates both the key and the IV. 
+  - The encryption value is can be saved to the file (by default) or it can be remove with `stripEncryptKey`. The `encryptionKey` object in the class after encoding **MUST** be saved or the file won't be able to be decrypted.
+  - A CRC check is recommended on when using encryption to ensure the data decrypted correctly.
+- `compress`
+  - Outside of the 32 byte header, the file is compressed in 512kb zlib chunks. You can also encrypt the compressed file as well (encryption happens after compression)
+  - The amount of data saved depends on the size of the file and the type of data within.
+- `stripKeys`
+  - More for security than size savings, this creates a *schema* like file where the keys to the data aren't include in the file. The keys can be found in the `keysArray` object in the class after encoding and **MUST** be saved or the file won't be able to be decrypted.
+- `CRC32`
+  - Outside of the 32 byte header, runs a CRC32 hash on the values and string data. Saves the hash to the file. Recommended when using either `encrypt` or `compress`.
 
 ## JamPak Specification
 

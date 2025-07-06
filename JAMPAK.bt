@@ -1,0 +1,569 @@
+//------------------------------------------------
+//--- 010 Editor v14.0.1 Binary Template
+//
+//      File: JAMPAK.bt
+//   Authors: HearHellacopters
+//   Version: 1.0
+//   Purpose: Storing JavaScript data in binary
+//  Category: Archive
+// File Mask: *.jpk
+//  ID Bytes: 
+//   History: 
+//   1.0      2025-07-01  Hellacopters: Made the original file   
+//------------------------------------------------
+
+enum <ubyte> JPType
+{
+    // positive fixint 0x00 - 0x7F
+    OBJECT_0         = 0x80, // {} & keys in object, each index after should be a string or key index
+    OBJECT_1         = 0x81,
+    OBJECT_2         = 0x82,
+    OBJECT_3         = 0x83,
+    OBJECT_4         = 0x84,
+    OBJECT_5         = 0x85,
+    OBJECT_6         = 0x86,
+    OBJECT_7         = 0x87,
+    OBJECT_8         = 0x88,
+    OBJECT_9         = 0x89,
+    OBJECT_10        = 0x8A,
+    OBJECT_11        = 0x8B,
+    OBJECT_12        = 0x8C,
+    OBJECT_13        = 0x8D,
+    OBJECT_14        = 0x8E,
+    OBJECT_15        = 0x8F,
+    ARRAY_0          = 0x90, // [] & array length
+    ARRAY_1          = 0x91,
+    ARRAY_2          = 0x92,
+    ARRAY_3          = 0x93,
+    ARRAY_4          = 0x94,
+    ARRAY_5          = 0x95,
+    ARRAY_6          = 0x96,
+    ARRAY_7          = 0x97,
+    ARRAY_8          = 0x98,
+    ARRAY_9          = 0x99,
+    ARRAY_10         = 0x9A,
+    ARRAY_11         = 0x9B,
+    ARRAY_12         = 0x9C,
+    ARRAY_13         = 0x9D,
+    ARRAY_14         = 0x9E,
+    ARRAY_15         = 0x9F,
+    KEY_0            = 0xA0, // Only used when stripping keys, uses string otherwise
+    KEY_1            = 0xA1,
+    KEY_2            = 0xA2,
+    KEY_3            = 0xA3,
+    KEY_4            = 0xA4,
+    KEY_5            = 0xA5,
+    KEY_6            = 0xA6,
+    KEY_7            = 0xA7,
+    KEY_8            = 0xA8,
+    KEY_9            = 0xA9,
+    KEY_10           = 0xAA,
+    KEY_11           = 0xAB,
+    KEY_12           = 0xAC,
+    KEY_13           = 0xAD,
+    KEY_14           = 0xAE,
+    KEY_15           = 0xAF,
+    STR_0            = 0xB0, // "" & string length
+    STR_1            = 0xB1,
+    STR_2            = 0xB2,
+    STR_3            = 0xB3,
+    STR_4            = 0xB4,
+    STR_5            = 0xB5,
+    STR_6            = 0xB6,
+    STR_7            = 0xB7,
+    STR_8            = 0xB8,
+    STR_9            = 0xB9,
+    STR_10           = 0xBA,
+    STR_11           = 0xBB,
+    STR_12           = 0xBC,
+    STR_13           = 0xBD,
+    STR_14           = 0xBE,
+    STR_15           = 0xBF,
+    NULL             = 0xC0, // 11000000
+    UNDEFINED        = 0xC1, // 11000001
+	BOOL_FALSE       = 0xC2, // 11000010
+	BOOL_TRUE        = 0xC3, // 11000011
+    FINISHED         = 0xC4, // 11000100 // Kill byte
+    LIST_END         = 0xC5, // 11000101
+    UNUSED_C6        = 0xC6, // 11000110  
+    OBJECT8          = 0xC7, // 11000111
+	OBJECT16         = 0xC8, // 11001000
+	OBJECT32         = 0xC9, // 11001001 
+    FLOAT32          = 0xCA, // 11001010
+    FLOAT64          = 0xCB, // 11001011  
+    UINT_8           = 0xCC, // 11001100
+    UINT_16          = 0xCD, // 11001101
+    UINT_32          = 0xCE, // 11001110
+	UINT_64          = 0xCF, // 11001111 
+	INT_8            = 0xD0, // 11010000
+	INT_16           = 0xD1, // 11010001
+	INT_32           = 0xD2, // 11010010
+	INT_64           = 0xD3, // 11010011       
+	KEY8             = 0xD4, // 11010100
+	KEY16            = 0xD5, // 11010101
+	KEY32            = 0xD6, // 11010110
+	STR8             = 0xD7, // 11010111
+	STR16            = 0xD8, // 11011000
+	STR32            = 0xD9, // 11011001
+	ARRAY8           = 0xDA, // 11011010
+	ARRAY16          = 0xDB, // 11011011    
+	ARRAY32          = 0xDC, // 11011100
+	EXT8             = 0xDD, // 11011101       
+	EXT16            = 0xDE, // 11011110
+	EXT32            = 0xDF, // 11011111
+    // negative fixint 0xe0 - 0xff
+};
+
+enum <ubyte> JPExtType
+{
+    // 0xD0 - 0xFF are reserve extend numbers
+    MAPS              = 0xEE, // Size here is the array size of Map, not the buffer size
+    SETS              = 0xEF, // Size here is the array size of Map, not the buffer size
+    SYMBOL            = 0xF0, // Has fixed 2 strings read after.
+    REGEX             = 0xF1, // Has fixed boolean and strings read after.
+    BIGUINT64ARRAY    = 0xF2,
+    BIGINT64ARRAY     = 0xF3,
+    FLOAT64ARRAY      = 0xF4,
+    FLOAT32ARRAY      = 0xF5,
+    FLOAT16ARRAY      = 0xF6, // not in use yet
+    INT32ARRAY        = 0xF7,
+    UINT32ARRAY       = 0xF8,
+    UINT16ARRAY       = 0xF9,
+    INT16ARRAY        = 0xFA,
+    INT8ARRAY         = 0xFB,
+    UINT8ARRAY        = 0xFC,
+    UINT8CLAMPEDARRAY = 0xFD,
+    BUFFER            = 0xFE,
+    DATE              = 0xFF // MSGPACK Standard
+};
+
+typedef struct (uint64 &toRead)
+{
+    local int i <hidden=true> = 0;
+    JPType type<bgcolor=cBlack>;
+    toRead--;
+    local string valueStr = "";
+    local string nameStr = "";
+    if (type < OBJECT_0) // Positive Fixed Number
+    { 
+        FSkip(-1);
+        ubyte data<bgcolor=cBlue>;
+        nameStr = "number";
+        valueStr = Str("%d", data);
+    } 
+    else if (type < ARRAY_0) // Fixed Object
+    { 
+        local int keys = type & 0x0f;
+        nameStr = "object";
+        valueStr = Str("Object Sized %d", keys);
+    } 
+    else if (type < KEY_0) // Fixed Array
+    { 
+        local int size = type & 0x0f;
+        nameStr = "array";
+        valueStr = Str("Array Sized %d", size);
+    } 
+    else if (type < STR_0) // Fixed Key (indexed)
+    { 
+        local int index = type & 0x0f;
+        nameStr = "key";
+        valueStr = Str("Key Index %d", index);
+    } 
+    else if (type < NULL) // Fixed String (indexed)
+    { 
+        local int index = type & 0x0f;
+        nameStr = "string";
+        valueStr = Str("%s", STRINGS.data[index+1].str);
+    } 
+    else if(type == NULL)
+    {
+        local string null = "null";
+        nameStr = "null";
+        valueStr = "null";
+    }
+    else if(type == UNDEFINED)
+    {
+        local string undefined = "undefined";
+        nameStr = "undefined";
+        valueStr = "undefined";
+    }
+    else if(type == BOL_FALSE)
+    {
+        local byte False = 0;
+        nameStr = "boolean";
+        valueStr = "False";
+    }
+    else if(type == BOL_TRUE)
+    {
+        local byte True = 1;
+        nameStr = "boolean";
+        valueStr = "True";
+    }
+    else if(type == FINISHED)
+    {
+        toRead = 0;
+        nameStr = "FINISHED";
+        break;
+        return;
+    }
+    else if( type == LIST_END ||
+             type == UNUSED_C6
+    )
+    {
+        nameStr = "LIST_END";
+        // Do nothing
+    }
+    else if(type == OBJECT8)
+    {
+        ubyte keys<bgcolor=cBlue>;
+        toRead-=1;
+        nameStr = "object";
+        valueStr = Str("Object Sized %d", keys);
+    }
+    else if(type == OBJECT16)
+    {
+        ushort keys<bgcolor=cBlue>;
+        toRead-=2;
+        nameStr = "object";
+        valueStr = Str("Object Sized %d", keys);
+    }
+    else if(type == OBJECT32)
+    {
+        uint keys<bgcolor=cBlue>;
+        toRead-=4;
+        nameStr = "object";
+        valueStr = Str("Object Sized %d", keys);
+    }
+    else if(type == FLOAT32)
+    {
+        float data<bgcolor=cBlue>;
+        toRead-=4;
+        nameStr = "number";
+        valueStr = Str("%f", data);
+    }
+    else if(type == FLOAT64)
+    {
+        double data<bgcolor=cBlue>;
+        toRead-8;
+        nameStr = "number";
+        valueStr = Str("%lf", data);
+    }
+    else if(type == UINT_8)
+    {
+        ubyte data<bgcolor=cBlue>;
+        toRead--;
+        nameStr = "number";
+        valueStr = Str("%d", data);
+    }
+    else if(type == UINT_16)
+    {
+        ushort data<bgcolor=cBlue>;
+        toRead-=2;
+        nameStr = "number";
+        valueStr = Str("%d", data);
+    }
+    else if(type == UINT_32)
+    {
+        uint data<bgcolor=cBlue>;
+        toRead-=4;
+        nameStr = "number";
+        valueStr = Str("%d", data);
+    }
+    else if(type == UINT_64) 
+    {
+        uint64 data<bgcolor=cBlue>;
+        toRead-=8;
+        nameStr = "number";
+        valueStr = Str("%Lu", data);
+    }
+    else if(type == INT_8)
+    {
+        byte data<bgcolor=cBlue>;
+        toRead--;
+        nameStr = "number";
+        valueStr = Str("%d", data);
+    }
+    else if(type == INT_16)
+    {
+        short data<bgcolor=cBlue>;
+        toRead-=2;
+        nameStr = "number";
+        valueStr = Str("%d", data);
+    }
+    else if(type == INT_32)
+    {
+        int data<bgcolor=cBlue>;
+        toRead-=4;
+        nameStr = "number";
+        valueStr = Str("%d", data);
+    }
+    else if(type == INT_64)
+    {
+        int64 data<bgcolor=cBlue>;
+        toRead-=8;
+        nameStr = "number";
+        valueStr = Str("%L", data);
+    }
+    else if(type == KEY8) 
+    {
+        ubyte index<bgcolor=cBlue>;
+        toRead-=1;
+        nameStr = "key";
+        valueStr = Str("Key Index %d", index);
+    }
+    else if(type == KEY16) 
+    {
+        ushort index<bgcolor=cBlue>;
+        toRead-=2;
+        nameStr = "key";
+        valueStr = Str("Key Index %d", index);
+    }
+    else if(type == KEY32) 
+    {
+        uint index<bgcolor=cBlue>;
+        toRead-=4;
+        nameStr = "key";
+        valueStr = Str("Key Index %d", index);
+    }
+    else if(type == STR8)
+    {
+        ubyte index<bgcolor=cYellow>;
+        toRead--;
+        nameStr = "key";
+        valueStr = Str("%s", STRINGS.data[index+1].str);
+    }
+    else if(type == STR16)
+    {
+        ushort index<bgcolor=cYellow>;
+        toRead-=2;
+        nameStr = "key";
+        valueStr = Str("%s", STRINGS.data[index+1].str);
+    }
+    else if(type == STR32)
+    {
+        uint index<bgcolor=cYellow>;
+        toRead-=4;
+        nameStr = "key";
+        valueStr = Str("%s", STRINGS.data[index+1].str);
+    }
+    else if(type == ARRAY8) 
+    {
+        ubyte size<bgcolor=cYellow>;
+        toRead-=1;
+        nameStr = "array";
+        valueStr = Str("Array Sized %d", size);
+    }
+    else if(type == ARRAY16)
+    {
+        ushort size<bgcolor=cYellow>;
+        toRead-=2;
+        nameStr = "array";
+        valueStr = Str("Array Sized %d", size);
+    }
+    else if(type == ARRAY32)
+    {
+        uint size<bgcolor=cYellow>;
+        toRead-=4;
+        nameStr = "array";
+        valueStr = Str("Array Sized %d", size);
+    }
+    else if(type <= EXT32)
+    {
+        if(type == EXT8)
+        {
+            ubyte length<bgcolor=cBlue>;
+            JPExtType typeEXT;
+            local uint size = 2;
+        }
+        else if(type == EXT16)
+        {
+            ushort length<bgcolor=cBlue>;
+            JPExtType typeEXT;
+            local uint size = 3;
+        }
+        else if(type == EXT32)
+        {
+            uint length<bgcolor=cBlue>;
+            JPExtType typeEXT;
+            local uint size = 5;
+        }
+        
+        toRead-=(size+length);
+        nameStr = "extenion";
+        valueStr = Str("Ext Type %X, size %d", typeEXT, length);
+        
+        if(!(typeEXT >= SYMBOL && typeEXT <= SETS)) // these don't use the length as read sizes
+        {
+            ubyte data[length]<bgcolor=cGreen>;
+        }
+    }
+    else // Negative Fixed Num
+    { 
+        FSkip(-1);
+        byte data<bgcolor=cBlue>;
+        nameStr = "number";
+        valueStr = Str("%d", data);
+    }
+} values<name=nameStr, read=valueStr>;
+
+typedef struct (uint64 &toRead)
+{
+    local int i <hidden=true> = 0;
+    JPType type<bgcolor=cBlack>;
+    toRead--;
+    if (type < ARRAY_0)
+    { 
+        Assert(type < ARRAY_0, "Invald data in string section.");
+    }
+    else if (type < KEY_0) // Fixed Array
+    { 
+        local int length = type & 0x0f;
+        local string str = "array";
+    }
+    else if (type < NULL) // Fixed String (indexed)
+    { 
+        local int length = type & 0x0f;
+        if(length){
+            char str[length]<bgcolor=cGreen>;
+        } else {
+            local char str;
+        }
+        toRead-=length;
+    } 
+    else if(type == FINISHED)
+    {
+        toRead = 0;
+        local string str = "FINISHED";
+        break;
+        return;
+    }
+    else if(type == STR8)
+    {
+        ubyte length<bgcolor=cYellow>;
+        toRead--;
+        if(length){
+            char str[length]<bgcolor=cGreen>;
+        } else {
+            local char str = "";
+        }
+        toRead-=length;
+    }
+    else if(type == STR16)
+    {
+        ushort length<bgcolor=cYellow>;
+        toRead-=2;
+        if(length){
+            char str[length]<bgcolor=cGreen>;
+        } else {
+            local char str = "";
+        }
+        toRead-=length;
+    }
+    else if(type == STR32)
+    {
+        uint length<bgcolor=cYellow>;
+        toRead-=4;
+        if(length){
+            char str[length]<bgcolor=cGreen>;
+        } else {
+            local char str = "";
+        }
+        toRead-=length;
+    }
+    else if(type == ARRAY8) 
+    {
+        ubyte length<bgcolor=cYellow>;
+        toRead-=1;
+        local string str = "array";
+    }
+    else if(type == ARRAY16)
+    {
+        ushort length<bgcolor=cYellow>;
+        toRead-=2;
+        local string str = "array";
+    }
+    else if(type == ARRAY32)
+    {
+        uint length<bgcolor=cYellow>;
+        toRead-=4;
+        local string str = "array";
+    }
+    else 
+    {
+        Assert(type > ARRAY32, "Invald data in string section.");
+    } 
+} strings<read=str>;
+
+struct{
+    LittleEndian();
+    struct{
+        local uint8 bBigEndian<hidden=true> = false;
+        if(ReadUShort() == 20554) // JP
+        {
+            char MAGIC[2]<comment="Little Endian", fgcolor=cRed>;
+        }
+        else if(ReadUShort() == 19024) // PJ
+        {
+            BigEndian();
+            bBigEndian = true;
+            char MAGIC[2]<comment="Big Endian", fgcolor=cRed>;
+        }
+        else
+        {
+            Assert(0 && "Bad Magics");
+        }
+        uint8 VERSION_MAJOR<fgcolor=cAqua>;
+        uint8 VERSION_MINOR<fgcolor=cAqua>;
+        local string name<hidden=true> = Str("JamPack v%d.%d - %s", VERSION_MAJOR, VERSION_MINOR, bBigEndian ? "Big Endian" : "Little Endian");
+    }MAGICS<read=name>;
+    uint8 HEADER_SIZE<fgcolor=cYellow>;
+    SetBackColor( cDkAqua );
+    SetForeColor( cWhite );
+    uint8   LargeFile: 1<comment="Over 4gigs">,
+            Compressed : 1<comment="Zlib compressed">,                             // Zlib compression of all data
+            Crc32 : 1<comment="Has CRC32 hash check">,                             // CRC32 check of file data (uncompressed or encrypted)
+            Encrypted : 1<comment="Encrypted">,                                // Encryption w/ key in file
+            EncryptionExcluded : 1<comment="AES decrypt data is stripped from the file">, // Encryption must supply key
+            KeyStripped : 1<comment="Object keys are removed from the file">,      // No keys in file, must supply keys
+            FLAG6 : 1<hidden=true>,
+            FLAG7 : 1<hidden=true>;
+    uint8 RESV_6<hidden=true>;
+    uint8 RESV_7<hidden=true>;
+    SetBackColor( cNone );
+    SetForeColor( cNone );
+    uint64 VALUE_SIZE<comment="Size of value section.", fgcolor=cYellow>;
+    uint64 STR_SIZE<comment="Size of string section.", fgcolor=cYellow>;
+    uint64 DATA_SIZE<comment="Total size of both sections, used when compressed or encrypted.", fgcolor=cYellow>;
+    // HEADER_SIZE 32
+    if(Crc32)
+    {
+        uint32 CRC32<comment="All data after decomp and decrypt", fgcolor=cBlue, bgcolor=cWhite>; // HEADER_SIZE + 4
+    }
+    if(Encrypted && !EncryptionExcluded)
+    {
+        uint32 EncryptionValue<comment="Encryption vlaue", fgcolor=cBlue, bgcolor=cWhite>; // HEADER_SIZE + 4
+    }
+    local string name<hidden=true> = Str("%s%s%s%s",MAGICS.name, Compressed ? " Compressed" :"", Encrypted ? " Encrypted" : "", KeyStripped ? " Key Stripped" : "");
+}JAMPAK_HEADER<read=this.name>;
+
+if(!JAMPAK_HEADER.Compressed && !JAMPAK_HEADER.Encrypted){
+    FSeek(JAMPAK_HEADER.HEADER_SIZE + JAMPAK_HEADER.VALUE_SIZE);
+    local uint64 toRead<hidden=true> = JAMPAK_HEADER.STR_SIZE;
+    struct {
+        do
+        {
+            strings data(toRead)<optimize=false>;
+        } while (toRead > 0);
+    } STRINGS;
+    FSeek(JAMPAK_HEADER.HEADER_SIZE);
+    toRead = JAMPAK_HEADER.VALUE_SIZE;
+    struct {
+        do
+        {
+            values data(toRead)<optimize=false>;
+        } while (toRead > 0);
+    } VALUES<open=true>;
+} else {
+    Printf("Can't parse Compressed or Encrypted files.");
+    ubyte data[JAMPAK_HEADER.DATA_SIZE]<fgcolor=cBlack, bgcolor=cWhite>;
+};

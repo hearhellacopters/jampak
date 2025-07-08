@@ -18,8 +18,10 @@ type reader = BiReader | BiReaderStream | BiWriter | BiWriterStream;
  */
 function GetVer(): { VERSION_MAJOR: ubyte, VERSION_MINOR: ubyte } {
     const ver = /(\d+)(\.)(\d+)(\.)(\d+)/g.exec(pack.version);
+
     return {
         VERSION_MAJOR: parseInt(ver ? ver[1] : "0"),
+
         VERSION_MINOR: parseInt(ver ? ver[3] : "0"),
     };
 };
@@ -52,12 +54,15 @@ function MAX_LENGTH(): number {
 /**
  * Max Buffer size for this system.
  */
-export const MAX_BUFFER = Math.min(MAX_LENGTH(), 4294967296); // 4 gigs
+export const MAX_BUFFER = MAX_LENGTH() || 0x100000000;
 
 export function isFloat32Safe(value: number): boolean {
   if (!Number.isFinite(value)) return true; // Infinity, -Infinity, NaN all store fine
+
   const f32 = new Float32Array(1);
+
   f32[0] = value;
+
   return f32[0] === value;
 }
 
@@ -69,84 +74,104 @@ const CHUNK_SIZE = 512 * 1024;
 /**
  * Compress a file using Deflate, framed with [length][chunk] blocks.
  */
-export function deflateFileSync(inputPath: string, outputPath: string): void {
-    const inFd = fs.openSync(inputPath, 'r');
-    const outFd = fs.openSync(outputPath, 'w');
-    const buffer = Buffer.alloc(CHUNK_SIZE);
+export function deflateFileSync(inWriter: BiWriterStream, outWriter: BiWriterStream): void {
+    inWriter.open();
 
-    let bytesRead: number;
-    let position = 0;
+    outWriter.open();
 
-    do {
-        bytesRead = fs.readSync(inFd, buffer, 0, CHUNK_SIZE, position);
-        if (bytesRead > 0) {
-            const chunk = buffer.subarray(0, bytesRead);
-            const compressed = zlib.deflateSync(chunk);
+    let bytesToProcess = inWriter.size;
 
-            const lenBuf = Buffer.alloc(4);
-            lenBuf.writeUInt32LE(compressed.length, 0);
-
-            fs.writeSync(outFd, lenBuf);
-            fs.writeSync(outFd, compressed);
-            position += bytesRead;
-        }
-    } while (bytesRead === CHUNK_SIZE);
-
-    fs.closeSync(inFd);
-    fs.closeSync(outFd);
-};
-
-/**
- * Compress a Buffer using Deflate, framed with [length][chunk] blocks.
- */
-export function deflateBuffer(bw: reader): Buffer {
-    const startingOff = bw.offset;
-    const size = bw.size;
-    const totalBuffer = size - startingOff;
+    let bytesStart = 0;
 
     let bytesRead = 0;
-    let bytesToProcess = totalBuffer;
-
-    const buffers:Buffer[] = [];
 
     do {
-        bytesRead = Math.min(CHUNK_SIZE, bytesToProcess);
-        const chunk = bw.extract(bytesRead);
-        const compressed = zlib.deflateSync(chunk);
-        const lenBuf = Buffer.alloc(4);
-        lenBuf.writeUInt32LE(compressed.length, 0);
-        buffers.push(lenBuf);
-        buffers.push(compressed);
-        bytesToProcess -= bytesRead;
-    } while (bytesRead === CHUNK_SIZE);
+        bytesRead = Math.min(CHUNK_SIZE, bytesToProcess);        
 
-    return Buffer.concat(buffers);
+        if (bytesRead > 0) {
+            const chunk = inWriter.read(bytesStart, bytesRead, true);
+
+            const compressed = zlib.deflateSync(chunk);
+
+            outWriter.uint32le = compressed.length;
+
+            outWriter.overwrite(compressed, true);
+
+            bytesToProcess -= bytesRead;
+
+            bytesStart += bytesRead;
+        }
+    } while (bytesRead === CHUNK_SIZE);
 };
 
 /**
  * Decompress a framed deflate-compressed file.
  */
-export function inflateFileSync(inputPath: string, outputPath: string): void {
-    const inFd = fs.openSync(inputPath, 'r');
-    const outFd = fs.openSync(outputPath, 'w');
-    const lenBuf = Buffer.alloc(4);
+export function inflateFileSync(inReader: BiReaderStream, outWriter: BiWriterStream): void {
+    inReader.open();
 
-    let position = 0;
+    outWriter.open();
 
-    while (fs.readSync(inFd, lenBuf, 0, 4, position) === 4) {
-        const chunkLen = lenBuf.readUInt32LE(0);
-        position += 4;
+    let bytesToProcess = inReader.size;
 
-        const compressed = Buffer.alloc(chunkLen);
-        fs.readSync(inFd, compressed, 0, chunkLen, position);
-        position += chunkLen;
+    let bytesStart = 0;
 
-        const decompressed = zlib.inflateSync(compressed);
-        fs.writeSync(outFd, decompressed);
-    }
+    let bytesRead = 0;
 
-    fs.closeSync(inFd);
-    fs.closeSync(outFd);
+    do {
+        bytesRead = inReader.uint32;
+
+        bytesStart += 4;
+
+        if (bytesRead > 0) {
+            const chunk = inReader.read(bytesStart, bytesRead, true);
+
+            bytesToProcess -= chunk.length;
+
+            const uncompressed = zlib.inflateSync(chunk);
+
+            outWriter.overwrite(uncompressed, true);
+
+            bytesStart += bytesRead;
+        }
+    } while (bytesStart < bytesToProcess);
+};
+
+/**
+ * Compress a Buffer using Deflate, framed with [length][chunk] blocks.
+ */
+export function deflateBuffer(inWriter: reader): Buffer {
+    let bytesToProcess = inWriter.size;
+
+    let bytesStart = 0;
+
+    let bytesRead = 0;
+
+    const buffers:Buffer[] = [];
+
+    do {
+        bytesRead = Math.min(CHUNK_SIZE, bytesToProcess);      
+
+        if (bytesRead > 0) {
+            const chunk = inWriter.read(bytesStart, bytesRead, true);
+
+            const compressed = zlib.deflateSync(chunk);
+
+            const lenBuf = Buffer.alloc(4);
+
+            lenBuf.writeUInt32LE(compressed.length, 0);
+
+            buffers.push(lenBuf);
+
+            buffers.push(compressed);
+
+            bytesToProcess -= bytesRead;
+
+            bytesStart += bytesRead;
+        }
+    } while (bytesRead === CHUNK_SIZE);
+
+    return Buffer.concat(buffers);
 };
 
 /**
@@ -154,7 +179,9 @@ export function inflateFileSync(inputPath: string, outputPath: string): void {
  */
 export function inflateBuffer(bw: reader): Buffer {
     const startingOff = bw.offset;
+
     const size = bw.size;
+    
     const totalBuffer = size - startingOff;
     
     let bytesRead = 0;
@@ -192,6 +219,7 @@ export function copyfile(inputPath: string, start: number, outputPath: string) {
     let readPos = start;
 
     let writePos = 0;
+
     while (remaining > 0) {
         const actualRead = Math.min(chunkSize, remaining);
 
@@ -207,6 +235,7 @@ export function copyfile(inputPath: string, start: number, outputPath: string) {
 
         remaining -= actualRead;
     }
+
     fs.closeSync(fd1);
     
     fs.closeSync(fd2);
@@ -920,7 +949,7 @@ export class JPBase {
      * Encryption value. For decryption.
      */
     set encryptionKey(value: uint32) {
-        this._encryptionKey = value & 0xffffffff;
+        this._encryptionKey = value >>> 0;
     }
 
     /**

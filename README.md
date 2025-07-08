@@ -1,10 +1,10 @@
 # JamPak for Node/JavaScript/TypeScript
 
-**JamPak** is an efficient file storage solution specifically made for both JavaScript and TypeScript data types in Node.js with a focus on accuracy, expandability, security, and performance. Includes compact storeage of all JSON types as well as TypedArrays, Maps, Sets, Dates, Symbols and more! This library uses a heavily modified implementation of **MessagePack** to improve storage size and create efficient binary serialization. 
+**JamPak** is an efficient file storage solution specifically made for both JavaScript and TypeScript data types in Node.js with a focus on accuracy, expandability, security, and performance. Includes compact storage of all JSON types as well as `TypedArrays`, `Maps`, `Sets`, `Dates`, `Symbols` and more! This library uses a heavily modified implementation of [**MessagePack**](https://github.com/msgpack/msgpack/blob/master/spec.md) using [**BiReader**](https://github.com/hearhellacopters/bireader) to improve storage size and create efficient binary serialization. 
 
 **JamPak** improvements over MessagePack:
- - Reduced file size by spliting data into two sections, values and strings
- - Keys can be stripped for 'schemas' like control to futher reduce file size
+ - Reduced file size by spliting data into two sections, **values** and **strings**
+ - Keys can be stripped for 'schemas' like control to futher reduce file size and added security
  - Compression / Encryption / CRC check
  - Endianness control
 
@@ -52,9 +52,11 @@ const encoded: Buffer = encoder.encode(object);
 - [API](#api)
   - [`new JPEncode(options?: EncoderOptions)`](#new-jpencodeoptions-encoderoptions))
     - [`EncoderOptions`](#encoderoptions)
+    - [Class `JPEncode` functions](#class-jpencode-functions)
     - [Class `JPEncode` objects](#class-jpencode-objects)
   - [`new JPDecode(options?: DecoderOptions)`](#new-jpdecodeoptions-decoderoptions)
     - [`DecoderOptions`](#DecoderOptions)
+    - [Class `JPDecode` functions](#class-jpdecode-functions)
     - [Class `JPDecode` objects](#class-jpdecode-objects)
 - [Extension Types](#extension-types)
   - [ExtensionCodec context](#extensioncodec-context)
@@ -109,11 +111,28 @@ const encryptionKey = encoder.encryptionKey; // Key for later decryption.
 | compress            | boolean          | false                         | Compress the file's data. |
 | stripKeys           | boolean          | false                         | Remove all keys from the save file. Must save the `keysArray` from the class it was created from. |
 
+#### Class `JPEncode` functions
+
+Note: Outside of the basic `encode`, these functions should only be used within a user created [Extension Type](#extension-types).
+
+| Functions        | Type                                            | Desc |
+| ------------------------- | -------------------------------------------------- | ---  |
+| encode(object, filePath?) | `function (uknown, string?) : Buffer`      | The basic function that creates the JamPak Buffer. If a `filePath` is supplied, it writes the file directly out. |
+|encodeObject(valueWriter, object, depth?)|`function (valueWriter: BiWriter \| BiWriterStream, object: Record<string, unknown>, depth?: number): number`| Encodes a `Object` to the passed `BiWriter`'s buffer. Returns the number of bytes written. |
+|encodeArray(valueWriter, array, depth?) |`function (valueWriter: BiWriter \| BiWriterStream, array: Array<unknown>, depth?: number): number`| Encodes a `Array` to the passed `BiWriter`'s buffer. Returns the number of bytes written.|
+|encodeString(valueWriter, string, isKey?)|`function (valueWriter: BiWriter \| BiWriterStream, string: string, isKey?: boolean): number`| Encodes a `string` to the string section of the current file and writes the index to the passed `BiWriter`'s buffer. Returns the number of bytes written to the buffer. |
+|encodeNull(valueWriter) |`function (valueWriter: BiWriter \| BiWriterStream): number`| Encodes a `null` to the passed `BiWriter`'s buffer. Returns the number of bytes written. |
+|encodeUndefined(valueWriter) |`function (valueWriter: BiWriter \| BiWriterStream): number`| Encodes a `undefined` to the passed `BiWriter`'s buffer. Returns the number of bytes written.|
+|encodeBoolean(valueWriter)|`function (valueWriter: BiWriter \| BiWriterStream): number`| Encodes a `true` or `false` to the passed `BiWriter`'s buffer. Returns the number of bytes written.|
+|encodeFinished(valueWriter)|`function (valueWriter: BiWriter \| BiWriterStream): number`| Encodes a "finished" byte to the passed `BiWriter`'s buffer. Will end all looping when the reader hits this byte. Returns the number of bytes written. |
+|encodeListEnd(valueWriter)|`function (valueWriter: BiWriter \| BiWriterStream): number`| Encodes a "list end" byte to the passed `BiWriter`'s buffer, useful when pulling loose data and don't want to break the whole loop. Returns the number of bytes written. | 
+|encodeNumber(valueWriter, number)|`function (valueWriter: BiWriter \| BiWriterStream, number: number): number`| Encodes a `number` to the passed `BiWriter`'s buffer. Computes the right byte size base on value.  Returns the number of bytes written.|
+|encodeBigInt64(valueWriter, bigint)|`function (valueWriter: BiWriter \| BiWriterStream, bigint: bigint): number` | Writes a `bigint` to the passed `BiWriter`'s buffer. Always written as a 64 bit value.|
+
 #### Class `JPEncode` objects
 
 | Name                      | Type                                       | Default                                            | Desc |
 | ------------------------- | ------------------------------------------ | -------------------------------------------------- | ---  |
-| encode(object, filePath?) | `function (uknown, string?) : Buffer`      | Your data to encode, file path to put the file to. | The function that creates the JamPak Buffer. |
 | encryptionKey             | number                                     | `ExtensionCodec.defaultCodec`                      | The encryption key used in the file. Must be saved if `stripEncryptKey` was used. |
 | keysArray                 | string[]                                   | []                                                 | The keys for the object data. Must be saved if `stripKeys` was used. |
 
@@ -143,6 +162,16 @@ console.log(object);
 | enforceBigInt | boolean | false |  Ensures all 64 bit values return as `bigint` |
 | makeJSON | boolean | false | Forces the decoder to only return only a valid JSON object. |
 
+#### Class `JPDecode` functions
+
+Note: Outside of the basic `decode`, these functions should only be used within a user created [Extension Type](#extension-types).
+
+
+| Functions        | Type                                            | Desc |
+| ------------------------- | -------------------------------------------------- | ---  |
+| decode(bufferOrSourcePath)  | `function (Buffer \| string) : unknown` | Your Buffer to decode or the source path to a JamPak file. | The function that decodes the JamPak Buffer. |
+| doDecodeSync(reader)| `function (reader: BiReader \| BiReaderStream): unknown` | Runs a raw decode on the passed `BiReader`'s Buffer. Return data wherever it ends based on the start value. |
+|doDecodeAsync(reader)| `async function (reader: BiReader \| BiReaderStream): Promise<unknown>` | Runs a raw decode on the passed `BiReader`'s Buffer. Return data wherever it ends based on the start value.|
 
 #### Class `JPDecode` objects
 
@@ -249,12 +278,14 @@ function encodeTimestampExtension<ContextType = undefined>(
  * Example decoding function
  * 
  * @param {BiReader | BiReaderStream} data - BiReader of buffer data.
+ * @param {JPDecode<ContextType>} decoder - class decoder
  * @param {number} extensionType - Registered extension number between 0x00 - 0xCF (for dummy checks)
  * @param {ContextType} context - Context of the class (shouldn't be needed)
  * @returns {Date}
  */
 function decodeTimestampExtension<ContextType = undefined>(
   data: BiReader | BiReaderStream,
+  decoder: JPDecode<ContextType>,
   extensionType: number,
   context: ContextType): Date {
     // check if the type matches

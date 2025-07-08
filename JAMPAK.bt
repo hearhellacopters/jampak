@@ -187,13 +187,13 @@ typedef struct (uint64 &toRead)
         nameStr = "undefined";
         valueStr = "undefined";
     }
-    else if(type == BOL_FALSE)
+    else if(type == BOOL_FALSE)
     {
         local byte False = 0;
         nameStr = "boolean";
         valueStr = "False";
     }
-    else if(type == BOL_TRUE)
+    else if(type == BOOL_TRUE)
     {
         local byte True = 1;
         nameStr = "boolean";
@@ -392,7 +392,7 @@ typedef struct (uint64 &toRead)
         nameStr = "extenion";
         valueStr = Str("Ext Type %X, size %d", typeEXT, length);
         
-        if(!(typeEXT >= SYMBOL && typeEXT <= SETS)) // these don't use the length as read sizes
+        if(!(typeEXT == SYMBOL || typeEXT == SETS)) // these don't use the length as read sizes
         {
             ubyte data[length]<bgcolor=cGreen>;
         }

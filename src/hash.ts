@@ -94,14 +94,14 @@ export class Crypt {
 
             this.key = rng.random_int();
         } else {
-            this.key = key & 0xffffffff;
+            this.key = key >>> 0;
         }
 
         const hash = this.key & 0x3;  
 
-        const spin = (this.key >>> 2) & 0x3F;
+        const spin = ((this.key >>> 2) & 0x3F) >>> 0;
 
-        const value = (this.key >>> 8) & 0xFFFFFF;
+        const value = ((this.key >>> 8) & 0xFFFFFF) >>> 0;
 
         const rng = new RandomXorShift(value);
 
@@ -154,19 +154,7 @@ export class Crypt {
         }
 
         return this.cipher.update(data);
-    };
-
-    encrypt_final() {
-        if (this.cipher == undefined) {
-            this.cipher = crypto.createCipheriv(this.hash, this.keyBuff, this.ivBuffer);
-        }
-
-        if (this.finished == true) {
-            return Buffer.alloc(0);
-        }
-
-        return this.cipher.final();
-    };
+    };    
 
     decrypt_block(data: Buffer) {
         if (this.decipher == undefined) {
@@ -180,6 +168,18 @@ export class Crypt {
         }
 
         return this.decipher.update(data);
+    };
+
+    encrypt_final() {
+        if (this.cipher == undefined) {
+            this.cipher = crypto.createCipheriv(this.hash, this.keyBuff, this.ivBuffer);
+        }
+
+        if (this.finished == true) {
+            return Buffer.alloc(0);
+        }
+
+        return this.cipher.final();
     };
 
     decrypt_final() {
@@ -235,20 +235,19 @@ const CRC_TABLE = new Int32Array([
 /**
  * Cyclic Redundancy Check 32.
  * 
- * @param {Uint8Array|Buffer} current - Message as string, Uint8Array or Buffer
+ * @param {Buffer} current - Message Buffer
  * @param {number?} previous - previous hash
  * @returns {number}
  */
-export function CRC32(current: Buffer | Uint8Array, previous: number): number {
-    var bytes: any;
-    if (!(current instanceof Buffer || current instanceof Uint8Array)) {
-        throw new Error("Message must be a Buffer or Uint8Array");
+export function CRC32(current: Buffer, previous: number): number {
+    if (!(current instanceof Buffer)) {
+        throw new Error("Message must be a Buffer.");
     }
 
     let crc = previous === 0 ? 0 : ~~previous! ^ -1;
 
-    for (let index = 0; index < bytes.length; index++) {
-        crc = CRC_TABLE[(crc ^ bytes[index]) & 0xff] ^ (crc >>> 8);
+    for (let index = 0; index < current.length; index++) {
+        crc = CRC_TABLE[(crc ^ current[index]) & 0xff] ^ (crc >>> 8);
     }
 
     return crc ^ -1;

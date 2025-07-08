@@ -17,7 +17,6 @@ import {
     stringList,
     MAX_BUFFER,
     JPBase,
-    concatenateFilesSync,
     ContextOf
 } from './common.js';
 
@@ -111,6 +110,8 @@ export class JPEncode<ContextType = undefined> extends JPBase {
     private stringList = new stringList();
 
     private keyList = new stringList();
+
+    private depth = 0;
 
     ////////////////
     // CONSTANTS  //
@@ -268,11 +269,13 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
                 return Buffer.concat([this.headerBuffer, compBuffer]);
             } else {
-                this.compWriter.close();
+                const fileFile = new BiWriterStream(this.fileName);
 
-                fs.writeFileSync(this.fileName + '.header', this.headerBuffer);
+                fileFile.overwrite(this.headerBuffer,true);
 
-                concatenateFilesSync(this.fileName + '.header', this.fileName + '.comp', this.fileName);
+                fileFile.overwrite(this.compWriter.read(0,this.compWriter.size),true);
+
+                this.compWriter.deleteFile();
                 // dummy buffer
                 return Buffer.alloc(0);
             }
@@ -306,8 +309,10 @@ export class JPEncode<ContextType = undefined> extends JPBase {
     };
 
     private doEncode(valueWriter:BiWriter|BiWriterStream, object: unknown, depth: number) {
+        this.depth = depth;
+
         if (object === null) {
-            return this.encodeNil(valueWriter);
+            return this.encodeNull(valueWriter);
         } else if (object === undefined) {
             return this.encodeUndefined(valueWriter);
         } else if (typeof object === "boolean") {
@@ -327,11 +332,11 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             if (ext != null) {
                 return this.encodeExtension(valueWriter, ext); //EXT
             } else if (Array.isArray(object)) {
-                return this.encodeArray(valueWriter, object, depth);
+                return this.encodeArray(valueWriter, object, this.depth);
             } else if (object instanceof Map) {
-                return this.encodeMaps(valueWriter, object, depth); // EXT
+                return this.encodeMap(valueWriter, object, this.depth); // EXT
             } else if (object instanceof Set) {
-                return this.encodeSets(valueWriter, object, depth); // EXT
+                return this.encodeSet(valueWriter, object, this.depth); // EXT
             } else if (object instanceof RegExp) {
                 return this.encodeRegEx(valueWriter, object); // EXT
             } else if (ArrayBuffer.isView(object) || object instanceof Buffer) {
@@ -339,7 +344,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             } else if (object instanceof Date) {
                 return this.encodeDate(valueWriter, object); // EXT
             } else if (typeof object === "object") {
-                return this.encodeObject(valueWriter, object as Record<string, unknown>, depth);
+                return this.encodeObject(valueWriter, object as Record<string, unknown>, this.depth);
             } else {
                 // function and other special object come here unless extensionCodec handles them.
                 throw new Error(`Unrecognized object: ${Object.prototype.toString.apply(object)}`);
@@ -351,7 +356,19 @@ export class JPEncode<ContextType = undefined> extends JPBase {
     // STANDARD //
     //////////////
 
-    encodeObject(valueWriter: BiWriter|BiWriterStream, object: Record<string, unknown>, depth: number) {
+    /**
+     * Writes an `Object` to the buffer as `Record<string, unknown>`
+     * 
+     * @param valueWriter - Writer
+     * @param object - Data to encode
+     * @param depth - Level depth within the master object. Leave blank unless you have a reason for adding to running loop.
+     * @returns The `number` of bytes written
+     */
+    encodeObject(valueWriter: BiWriter|BiWriterStream, object: Record<string, unknown>, depth?: number) {
+        if(depth == undefined){
+            depth = this.depth;
+        }
+        
         var length = 1;
 
         const keys = Object.keys(object);
@@ -397,9 +414,22 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return length;
     };
 
-    encodeArray(valueWriter:BiWriter|BiWriterStream, object: Array<unknown>, depth: number) {
+    /**
+     * Writes an `Array` to the buffer as `Array<unknown>`
+     * 
+     * @param valueWriter - Writer
+     * @param array - Data to encode
+     * @param depth - Level depth within the master object. Leave blank unless you have a reason for adding to running loop.
+     * @returns The `number` of bytes written
+     */
+    encodeArray(valueWriter:BiWriter|BiWriterStream, array: Array<unknown>, depth?: number) {
+        if(depth == undefined){
+            depth = this.depth;
+        }
+
         var length = 1;
-        const size = object.length;
+
+        const size = array.length;
 
         if (size < 16) {
             // fixarray
@@ -429,18 +459,30 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             throw new Error(`Too large array: ${size}`);
         }
 
-        for (const item of object) {
+        for (const item of array) {
             length += this.doEncode(valueWriter, item, depth + 1);
         }
 
         return length;
     };
 
-    encodeString(valueWriter:BiWriter|BiWriterStream, object: string, isKey: boolean) {
+    /**
+     * Writes a `string` to the buffer's string section.
+     * 
+     * @param valueWriter - Writer
+     * @param string - Data to encode
+     * @param isKey If the string is used a an Object key. Only used when `stripKeys` is enabled.
+     * @returns The `number` of bytes written
+     */
+    encodeString(valueWriter:BiWriter|BiWriterStream, string: string, isKey?: boolean) {
+        if(isKey == undefined){
+            isKey = false;
+        }
+
         var length = 1;
 
         if (isKey && this.KeyStripped) {
-            const index = this.keyList.add(object);
+            const index = this.keyList.add(string);
 
             if (index < 16) {
                 valueWriter.ubyte = JPType.KEY_0 + index;
@@ -469,7 +511,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
                 throw new Error(`String index too long: ${index}`);
             }
         } else {
-            const index = this.stringList.add(object);
+            const index = this.stringList.add(string);
 
             if (index < 16) {
                 valueWriter.ubyte = JPType.STR_0 + index;
@@ -502,18 +544,37 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return length;
     };
 
-    encodeNil(valueWriter:BiWriter|BiWriterStream) {
+    /**
+     * Writes a `null` to the buffer
+     * 
+     * @param valueWriter - Writer
+     * @returns The `number` of bytes written
+     */
+    encodeNull(valueWriter:BiWriter|BiWriterStream) {
         valueWriter.ubyte = JPType.NULL;
 
         return 1;
     };
 
+    /**
+     * Writes an `undefined` to the buffer
+     * 
+     * @param valueWriter - Writer
+     * @returns The `number` of bytes written
+     */
     encodeUndefined(valueWriter:BiWriter|BiWriterStream) {
         valueWriter.ubyte = JPType.UNDEFINED;
 
         return 1;
     };
 
+    /**
+     * Writes a `boolean` true or false to the buffer
+     * 
+     * @param valueWriter - Writer
+     * @param object - `true` or `false`
+     * @returns The `number` of bytes written
+     */
     encodeBoolean(valueWriter:BiWriter|BiWriterStream, object: boolean) {
         if (object === false) {
             valueWriter.ubyte = JPType.BOOL_FALSE;
@@ -524,73 +585,106 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return 1;
     };
 
-    encodeNumber(valueWriter:BiWriter|BiWriterStream, object: number) {
+    /**
+     * Writes an "finished" byte to the buffer. End the loop when hit if not finished otherwise.
+     * 
+     * @param valueWriter - Writer
+     * @returns The `number` of bytes written
+     */
+    encodeFinished(valueWriter:BiWriter|BiWriterStream){
+        valueWriter.ubyte = JPType.FINISHED;
+
+        return 1;
+    };
+
+    /**
+     * Writes a "list end" byte to the buffer, useful when pulling loose data and don't want to break the whole loop.
+     * 
+     * @param valueWriter - Writer
+     * @returns The `number` of bytes written
+     */
+    encodeListEnd(valueWriter:BiWriter|BiWriterStream){
+        valueWriter.ubyte = JPType.LIST_END;
+
+        return 1;
+    };
+
+    /**
+     * Writes a `number` to the buffer . Computes the right byte size base on value.
+     * 
+     * Notes: Use `encodeBigInt64` for `bigint` types.
+     * 
+     * @param valueWriter - Writer
+     * @param number - Data to encode
+     * @returns The `number` of bytes written
+     */
+    encodeNumber(valueWriter:BiWriter|BiWriterStream, number: number) {
         var length = 1;
 
-        if (Number.isSafeInteger(object)) {
-            if (object >= 0) {
-                if (object < 0x80) {
+        if (Number.isSafeInteger(number)) {
+            if (number >= 0) {
+                if (number < 0x80) {
                     // positive fixint
-                    valueWriter.ubyte = object;
-                } else if (object < 0x100) {
+                    valueWriter.ubyte = number;
+                } else if (number < 0x100) {
                     // uint 8
                     valueWriter.ubyte = JPType.UINT_8;
 
-                    valueWriter.ubyte = object;
+                    valueWriter.ubyte = number;
 
                     length++;
-                } else if (object < 0x10000) {
+                } else if (number < 0x10000) {
                     // uint 16
                     valueWriter.ubyte = JPType.UINT_16;
 
-                    valueWriter.ushort = object;
+                    valueWriter.ushort = number;
 
                     length += 2;
-                } else if (object < 0x100000000) {
+                } else if (number < 0x100000000) {
                     // uint 32
                     valueWriter.ubyte = JPType.UINT_32;
 
-                    valueWriter.uint = object;
+                    valueWriter.uint = number;
 
                     length += 4;
                 } else {
                     // uint 64
                     valueWriter.ubyte = JPType.UINT_64;
 
-                    valueWriter.uint64 = object;
+                    valueWriter.uint64 = number;
 
                     length += 8;
                 }
             } else {
-                if (object >= -0x20) {
+                if (number >= -0x20) {
                     // negative fixint
-                    valueWriter.byte = object;
-                } else if (object >= -0x80) {
+                    valueWriter.byte = number;
+                } else if (number >= -0x80) {
                     // int 8
                     valueWriter.ubyte = JPType.INT_8;
 
-                    valueWriter.byte = object;
+                    valueWriter.byte = number;
 
                     length++;
-                } else if (object >= -0x8000) {
+                } else if (number >= -0x8000) {
                     // int 16
                     valueWriter.ubyte = JPType.INT_16;
 
-                    valueWriter.int16 = object;
+                    valueWriter.int16 = number;
 
                     length += 2;
-                } else if (object >= -0x80000000) {
+                } else if (number >= -0x80000000) {
                     // int 32
                     valueWriter.ubyte = JPType.INT_32;
 
-                    valueWriter.int32 = object;
+                    valueWriter.int32 = number;
 
                     length += 4;
                 } else {
                     // int 64
                     valueWriter.ubyte = JPType.INT_64;
 
-                    valueWriter.int64 = object;
+                    valueWriter.int64 = number;
 
                     length += 8;
                 }
@@ -598,23 +692,30 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             return length;
         } else {
-            return this.encodeNumberAsFloat(valueWriter, object);
+            return this.encodeNumberAsFloat(valueWriter, number);
         }
     };
 
-    encodeBigInt64(valueWriter:BiWriter|BiWriterStream, object: bigint) {
+    /**
+     * Writes a `bigint` to the buffer. Always written as a 64 bit value.
+     * 
+     * @param valueWriter - Writer
+     * @param bigint - Data to encode
+     * @returns The `number` of bytes written
+     */
+    encodeBigInt64(valueWriter:BiWriter|BiWriterStream, bigint: bigint) {
         var length = 0;
 
-        if (object >= BigInt(0)) {
+        if (bigint >= BigInt(0)) {
             // uint 64
             valueWriter.ubyte = JPType.UINT_64; length++;
 
-            valueWriter.uint64 = object; length += 8;
+            valueWriter.uint64 = bigint; length += 8;
         } else {
             // int 64
             valueWriter.ubyte = JPType.INT_64; length++;
 
-            valueWriter.int64 = object; length += 8;
+            valueWriter.int64 = bigint; length += 8;
         }
 
         return length;
@@ -777,7 +878,19 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return length;
     };
 
-    private encodeMaps<K, V>(valueWriter: BiWriter | BiWriterStream, object: Map<K, V>, depth: number) {
+    /**
+     * Writes a `Map` to the buffer as `Map<key, value>`
+     * 
+     * @param valueWriter - Writer
+     * @param object - Data to encode
+     * @param depth - Level depth within the master object. Leave blank unless you have a reason for adding to running loop.
+     * @returns The `number` of bytes written
+     */
+    encodeMap<K, V>(valueWriter: BiWriter | BiWriterStream, object: Map<K, V>, depth?: number) {
+        if(depth == undefined){
+            depth = this.depth;
+        }
+
         // Note: length here is the array size of Map, not the buffer size
         var length = 1;
 
@@ -824,7 +937,19 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return length;
     };
 
-    private encodeSets<T>(valueWriter: BiWriter | BiWriterStream, object: Set<T>, depth: number) {
+    /**
+     * Writes a `Set` to the buffer as `Set<type>`
+     * 
+     * @param valueWriter - Writer
+     * @param object - Data to encode
+     * @param depth - Level depth within the master object. Leave blank unless you have a reason for adding to running loop.
+     * @returns The `number` of bytes written
+     */
+    encodeSet<T>(valueWriter: BiWriter | BiWriterStream, object: Set<T>, depth?: number) {
+        if(depth == undefined){
+            depth = this.depth;
+        }
+        
         // Note: length here is the array size of Set, not the buffer size
         var length = 1;
 
@@ -863,7 +988,14 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return length;
     };
 
-    private encodeSymbol(valueWriter: BiWriter | BiWriterStream, object: symbol) {
+    /**
+     * Writes a `symbol` to the buffer
+     * 
+     * @param valueWriter - Writer
+     * @param object - Data to encode
+     * @returns The `number` of bytes written
+     */
+    encodeSymbol(valueWriter: BiWriter | BiWriterStream, object: symbol) {
         const extBuffer = new BiWriter(Buffer.alloc(512));
 
         const keyCheck = Symbol.keyFor(object);
@@ -905,7 +1037,14 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return length;
     };
 
-    private encodeRegEx(valueWriter: BiWriter | BiWriterStream, object: RegExp) {
+    /**
+     * Writes a `RegEx` to the buffer
+     * 
+     * @param valueWriter - Writer
+     * @param object - Data to encode
+     * @returns The `number` of bytes written
+     */
+    encodeRegEx(valueWriter: BiWriter | BiWriterStream, object: RegExp) {
         const extBuffer = new BiWriter(Buffer.alloc(512));
 
         const src = object.source;
@@ -943,7 +1082,14 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return length;
     };
 
-    private encodeBinary(valueWriter: BiWriter|BiWriterStream, object: Buffer | ArrayBufferView) {
+    /**
+     * Writes a `TypedArray` or `Buffer` to the buffer
+     * 
+     * @param valueWriter - Writer
+     * @param object - Data to encode
+     * @returns The `number` of bytes written
+     */
+    encodeBinary(valueWriter: BiWriter|BiWriterStream, object: Buffer | ArrayBufferView) {
         var length = 1;
 
         const byteLength = object.byteLength;
@@ -1018,7 +1164,14 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return length;
     };
 
-    private encodeDate(valueWriter:BiWriter | BiWriterStream, object: Date) {
+    /**
+     * Writes a `Date` to the buffer
+     * 
+     * @param valueWriter - Writer
+     * @param object - Data to encode
+     * @returns The `number` of bytes written
+     */
+    encodeDate(valueWriter:BiWriter | BiWriterStream, object: Date) {
         const TIMESTAMP32_MAX_SEC = 0x100000000 - 1; // 32-bit unsigned int
 
         const TIMESTAMP64_MAX_SEC = 0x400000000 - 1; // 34-bit unsigned int
@@ -1097,7 +1250,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             this.endian = endian;
         }
 
-        if (BigInt(this.HEADER_SIZE) + this.DATA_SIZE > BigInt(MAX_BUFFER)) {
+        if (BigInt(this.HEADER_SIZE) + this.DATA_SIZE > BigInt(0x100000000)) {
             this.LargeFile = 1;
         }
 
@@ -1163,27 +1316,33 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         if (!this.useStream) {
             this.valueWriter.trim();
 
-            const valueData = this.valueWriter.data;
-
             this.strWriter.trim();
 
             const stringData = this.strWriter.data;
 
-            const dataBuffer = Buffer.concat([valueData, stringData]);
+            this.valueWriter.overwrite(stringData,true);
 
-            this.compWriter = new BiWriter(dataBuffer);
+            this.compWriter = this.valueWriter;
+
+            this.compWriter.trim();
         } else {
-            this.valueWriter.close();
+            this.valueWriter.trim();
 
-            this.strWriter.close();
+            this.strWriter.trim();
 
-            this.valueWriter = null;
+            const compWriter = new BiWriterStream(this.fileName + ".comp");
 
-            this.strWriter = null;
+            compWriter.overwrite(this.valueWriter.read(0, this.valueWriter.size), true);
 
-            concatenateFilesSync(this.fileName + ".values", this.fileName + ".strings", this.fileName + ".comp");
+            compWriter.overwrite(this.strWriter.read(0, this.strWriter.size), true);
 
-            this.compWriter = new BiWriterStream(this.fileName + ".comp");
+            this.valueWriter.deleteFile();
+
+            this.strWriter.deleteFile();
+
+            this.compWriter = compWriter;
+
+            this.compWriter.trim();
         }
 
         if (this.Crc32) {
@@ -1231,31 +1390,49 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             return this.DATA_SIZE;
         } else {
-            const chunkSize = 16; // 16 bytes at a time
+            const CHUNK_SIZE = 16; // 16 bytes at a time
 
-            const ctx = this.compWriter;
+            this.compWriter.gotoStart();
 
-            for (let position = 0; position <= ctx.size;) {
-                const buffer = ctx.read(position, Math.min(chunkSize, ctx.size - position));
+            var buffer = Buffer.alloc(0);
 
-                if (buffer.length == 0) {
-                    ctx.data = cypter.encrypt_final();
+            let bytesToProcess = Number(this.DATA_SIZE);
 
-                    ctx.commit();
+            let bytesStart = 0;
 
-                    break;
-                };
+            let bytesRead = 0;
 
-                ctx.data = cypter.encrypt_block(buffer as Buffer);
+            do {
+                bytesRead = Math.min(CHUNK_SIZE, bytesToProcess);
 
-                ctx.commit();
+                if (bytesRead > 0) {
+                    buffer = this.compWriter.read(bytesStart, bytesRead) as Buffer;
 
-                position += buffer.length;
+                    bytesToProcess -= buffer.length;
 
-                if (position == ctx.size) {
-                    ctx.data = cypter.encrypt_final();
+                    const data = cypter.encrypt_block(buffer as Buffer);
 
-                    ctx.commit();
+                    if(data.length != 0){
+                        this.compWriter.overwrite(data, true);
+                    }
+
+                    bytesStart += buffer.length;
+                } else {
+                    const data = cypter.encrypt_final();
+
+                    if(data.length != 0){
+                        this.compWriter.overwrite(data, true);
+                    }
+
+                    bytesToProcess = 0;
+                }
+            } while (bytesToProcess !== 0);
+
+            if(!cypter.finished){
+                const data = cypter.encrypt_final();
+
+                if(data.length != 0){
+                    this.compWriter.overwrite(data, true);
                 }
             }
 
@@ -1276,28 +1453,35 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         }
 
         if (!this.useStream) {
+            this.compWriter.gotoStart();
+
             const compBuffer = deflateBuffer(this.compWriter);
 
             this.compWriter = new BiWriter(compBuffer);
 
+            this.compWriter.gotoEnd();
+
             this.DATA_SIZE = this.compWriter.size;
         } else {
-            this.compWriter.close();
-
             const HEADER_SIZE = this.HEADER_SIZE;
-
-
-            const fileName = this.fileName + ".comp";
 
             const temp = this.fileName + ".comp.tmp";
 
-            deflateFileSync(fileName, temp);
+            const tempcompWriter = new BiWriterStream(temp);
 
-            fs.renameSync(temp, fileName);
+            tempcompWriter.open();
 
-            this.compWriter.open();
+            deflateFileSync(this.compWriter as BiWriterStream, tempcompWriter);
+
+            this.compWriter.gotoStart();
+
+            this.compWriter.overwrite(tempcompWriter.read(0,tempcompWriter.offset), true);
+
+            this.compWriter.trim();
 
             this.DATA_SIZE = this.compWriter.size;
+
+            tempcompWriter.deleteFile();
 
             if (HEADER_SIZE + this.compWriter.size > MAX_BUFFER) {
                 this.LargeFile = 1;
@@ -1316,18 +1500,18 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         }
 
         if (!this.useStream) {
-            this.CRC32 = CRC32(this.compWriter.get, 0);
+            const data = this.compWriter.data as Buffer;
+
+            this.CRC32 = CRC32(data, 0) >>> 0;
 
             return;
         } else {
             let crc = 0;
 
-            const chunkSize = 0x2000; // 8192 bytes
+            const CHUNK_SIZE = 0x2000; // 8192 bytes
 
-            const ctx = this.compWriter;
-
-            for (let position = 0; position <= ctx.size;) {
-                const buffer = ctx.read(position, Math.min(chunkSize, ctx.size - position));
+            for (let position = 0; position <= this.compWriter.size;) {
+                const buffer = this.compWriter.read(position, Math.min(CHUNK_SIZE, this.compWriter.size - position)) as Buffer;
 
                 if (buffer.length == 0) break;
 
@@ -1336,7 +1520,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
                 position += buffer.length;
             }
 
-            this.CRC32 = crc;
+            this.CRC32 = crc >>> 0;
         }
     };
 }

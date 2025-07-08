@@ -10,7 +10,7 @@
         "dist"
     ],
     "dependencies": {
-        "bireader": "^3.1.11"
+        "bireader": "^3.1.13"
     },
     "repository": {
         "type": "git",

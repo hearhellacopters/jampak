@@ -1,5 +1,6 @@
 import { BiReader, BiReaderStream, BiWriter, BiWriterStream } from "bireader";
-import { JPEncode } from './encode.js'
+import { JPEncode } from './encode.js';
+import { JPDecode } from './decode.js';
 
 /**
  * Example number type to register the extension between 0x00 - 0xCF.
@@ -86,12 +87,14 @@ function encodeTimestampExtension<ContextType = undefined>(
  * Example decoding function
  * 
  * @param {BiReader | BiReaderStream} data - BiReader of buffer data.
+ * @param {JPDecode<ContextType>} decoder - class decoder
  * @param {number} extensionType - Registered extension number between 0x00 - 0xCF (for dummy checks)
  * @param {ContextType} context - Context of the class (shouldn't be needed)
  * @returns {Date}
  */
 function decodeTimestampExtension<ContextType = undefined>(
   data: BiReader | BiReaderStream,
+  decoder: JPDecode<ContextType>,
   extensionType: number,
   context: ContextType): Date {
     // check if the type matches
@@ -155,7 +158,8 @@ export class JPExtData {
 
 export type JPExtensionDecoderType<ContextType> = (
   data: BiReader | BiReaderStream,
-  extensionType: number,
+  decoder: JPDecode<ContextType>,
+  type: number,
   context: ContextType,
 ) => unknown;
 
@@ -169,7 +173,7 @@ export type JPExtensionCodecType<ContextType> = {
   // eslint-disable-next-line @typescript-eslint/naming-convention
   __brand?: ContextType;
   tryToEncode(object: unknown, encoder: JPEncode<ContextType>, context: ContextType,): JPExtData | null;
-  decode(data: BiReader | BiReaderStream, extType: number, context: ContextType): unknown;
+  decode(data: BiReader | BiReaderStream, decoder: JPDecode<ContextType>, type:number, context: ContextType): unknown;
 };
 
 export type JPExtensionType<ContextType = undefined> = {
@@ -192,6 +196,7 @@ export type JPExtensionType<ContextType = undefined> = {
    * Decoding function
    * 
    * @param {BiReader | BiReaderStream} data - BiReader of buffer data.
+   * @param {JPDecode<ContextType>} decoder - class decoder
    * @param {number} extensionType - Registered extension number between 0x00 - 0xCF (for dummy checks)
    * @param {ContextType} context - Context of the class (shouldn't be needed)
    * @returns `YourType`
@@ -249,11 +254,11 @@ export class JPExtensionCodec<ContextType = undefined> implements JPExtensionCod
     return null;
   };
 
-  public decode(data: BiReader | BiReaderStream, type: number, context: ContextType): unknown {
+  public decode(data: BiReader | BiReaderStream, decoder: JPDecode<ContextType>, type:number, context: ContextType): unknown {
     const decodeExt = this.decoders[type];
 
     if (decodeExt) {
-      return decodeExt(data, type, context);
+      return decodeExt(data, decoder, type, context);
     } else {
       // decode() does not fail, returns ExtData instead.
       return new JPExtData(type, data.data as Buffer);

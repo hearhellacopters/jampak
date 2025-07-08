@@ -1,6 +1,6 @@
 import fs from "fs";
 import { Crypt, CRC32 } from './hash.js';
-import { BiReader, BiReaderStream } from 'bireader';
+import { BiReader, BiReaderStream, BiWriterStream } from 'bireader';
 import { JPExtensionCodec, JPExtensionCodecType } from "./ext.js";
 import {
     VERSION_NUMBER,
@@ -12,7 +12,6 @@ import {
     JPExtType,
     MAX_BUFFER,
     JPBase,
-    copyfile,
     ensureBuffer,
     ContextOf
 } from './common.js';
@@ -411,7 +410,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
             if(this.tempCreated){
                 (this.valueReader as BiReaderStream).deleteFile(); 
-
+            
                 this.valueReader.close();
             }
 
@@ -426,6 +425,94 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             return;
         } finally {
             this.entered = false;
+        }
+    };
+
+    private checkFilePath(filePath: string): void {
+        var biTest: BiReaderStream | BiReader = new BiReaderStream(filePath);
+
+        const testBuffer = biTest.extract(40);
+
+        biTest.close();
+
+        biTest = new BiReader(testBuffer);
+
+        this.testHeader(biTest);
+
+        biTest.close();
+
+        if(!this.useStream){
+            this.buffer = fs.readFileSync(filePath);
+        }
+    };
+
+    private testHeader(br: BiReaderStream | BiReader) {
+        const MAGICS = br.uint16;
+
+        if (!(MAGICS == 0x504A || MAGICS == 0x4A50)) {
+            throw new Error(`File magics incorrect. Expecting 0x504A or 0x4A50, but got 0x${MAGICS.toString(16).padStart(4, "0")}`);
+        }
+
+        if (MAGICS == 0x4A50) {
+            this.endian = "big";
+        }
+
+        const V_MAJOR = br.uint8;
+
+        const V_MINOR = br.uint8;
+
+        this.HEADER_SIZE = br.uint8;
+
+        this.LargeFile = br.bit1 as bit;
+
+        this.Compressed = br.bit1 as bit;
+
+        this.Crc32 = br.bit1 as bit;
+
+        this.Encrypted = br.bit1 as bit;
+
+        this.EncryptionExcluded = br.bit1 as bit;
+
+        this.KeyStripped = br.bit1 as bit;
+
+        br.bit1;  // FLAG6
+
+        br.bit1;  // FLAG7
+
+        br.uint8;  // RESV_6 FLAG8-15
+
+        br.uint8;  // RESV_7 FLAG16-23
+
+        this.VALUE_SIZE = br.uint64;
+
+        this.STR_SIZE = br.uint64;
+
+        this.DATA_SIZE = br.uint64;
+
+        const V_NUMBER = parseFloat(`${V_MAJOR}.${V_MINOR}`);
+
+        if (V_NUMBER > VERSION_NUMBER) {
+            console.warn(`File was encoded in a more advanced version of this package which may cause issues. Package: ${VERSION_NUMBER} - File: ${V_NUMBER}`);
+        }
+
+        if (this.LargeFile && (br.size > MAX_BUFFER || (this.STR_SIZE + this.VALUE_SIZE) > MAX_BUFFER)) {
+            this.useStream = true;
+        }
+
+        if (this.EncryptionExcluded && this.encryptionKey == 0) {
+            throw new Error('The encryption key is not included in the file and the key was not set in the decoder. Can not decode.');
+        }
+
+        if (this.KeyStripped && this.keysArray.length == 0) {
+            throw new Error('The keysArray was removed from the file and not set in the decoder. Can not decode.');
+        }
+        // extra headers
+        if (this.Crc32) {
+            this.CRC32 = br.uint32;
+        }
+
+        if (this.Encrypted && !this.EncryptionExcluded) {
+            this.encryptionKey = br.uint32;
         }
     };
 
@@ -446,58 +533,124 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
             this.compReader.endian = this.endian;
 
-            const temp = this.fileName + ".comp";
+            this.compReader.open();
+
+            this.compReader.goto(this.HEADER_SIZE);
 
             this.tempCreated = false;
 
             if (this.Encrypted) {
                 // make comp file without header
-                copyfile(this.fileName, this.HEADER_SIZE, temp);
+                const compWriter = new BiWriterStream(this.fileName + ".comp");
+
+                compWriter.unrestrict();
+
+                compWriter.endian = this.endian;
+
+                compWriter.open();
+
+                compWriter.overwrite(this.compReader.read(this.HEADER_SIZE, this.compReader.size - this.HEADER_SIZE), true);
+
+                compWriter.trim();
 
                 this.tempCreated = true;
 
-                this.decrypt(temp);
+                this.decrypt(compWriter);
+
+                compWriter.close();
+
+                this.compReader = new BiReaderStream(this.fileName + ".comp");
+
+                this.compReader.endian = this.endian;
+
+                this.compReader.unrestrict();
+
+                this.compReader.open();
             }
+
             if (this.Compressed) {
                 // check if comp file was made
                 if (this.tempCreated) {
-                    inflateFileSync(temp, temp + ".tmp");
+                    // compReader should be just the data
+                    const tempcompWriter = new BiWriterStream(this.fileName + ".comp.tmp");
 
-                    fs.renameSync(temp + ".tmp", temp);
+                    tempcompWriter.endian = this.endian;
 
+                    tempcompWriter.open();
+
+                    inflateFileSync(this.compReader, tempcompWriter);
+
+                    this.compReader.writeMode(true);
+
+                    this.compReader.gotoStart();
+
+                    this.compReader.overwrite(tempcompWriter.read(0, tempcompWriter.offset), true);
+
+                    this.compReader.trim();
+
+                    this.compReader.writeMode(false);
+
+                    tempcompWriter.deleteFile();
                 } else {
-                    copyfile(this.fileName, this.HEADER_SIZE, temp);
+                    // split off header
+                    const compWriter = new BiWriterStream(this.fileName + ".comp");
+
+                    compWriter.endian = this.endian;
+
+                    compWriter.open();
+
+                    compWriter.overwrite(this.compReader.read(this.HEADER_SIZE, this.compReader.size - this.HEADER_SIZE), true);
+
+                    compWriter.trim();
+
+                    compWriter.close();
+
+                    const compReader = new BiReaderStream(this.fileName + ".comp");
+
+                    compReader.endian = this.endian;
+
+                    compReader.unrestrict();
+
+                    const tempcompWriter = new BiWriterStream(this.fileName + ".comp.tmp");
+
+                    tempcompWriter.endian = this.endian;
+
+                    tempcompWriter.open();
 
                     this.tempCreated = true;
 
-                    inflateFileSync(temp, temp + ".tmp");
+                    inflateFileSync(compReader, tempcompWriter);
 
-                    fs.renameSync(temp + ".tmp", temp);
+                    compReader.writeMode(true);
+
+                    compReader.gotoStart();
+
+                    compReader.overwrite(tempcompWriter.read(0,tempcompWriter.offset), true);
+
+                    compReader.trim();
+
+                    compReader.writeMode(false);
+
+                    tempcompWriter.deleteFile();
+
+                    this.compReader = compReader;
                 }
             }
             if (this.Crc32) {
-                const chunkSize = 0x2000; // 8192 bytes
+                const CHUNK_SIZE = 0x2000; // 8192 bytes
 
                 var crc = 0;
 
-                var position = this.HEADER_SIZE;
+                var start = this.HEADER_SIZE;
 
-                var ctx: BiReaderStream = this.compReader;
-
-                ctx.goto(this.HEADER_SIZE);
-                // If there is a comp file, no header
-                if (this.tempCreated) {
-                    this.fileReader = new BiReaderStream(temp);
-
-                    this.fileReader.endian = this.endian;
-
-                    ctx.open();
-
-                    position = 0;
+                if (this.tempCreated) {                    
+                    start = 0;
                 }
 
-                for (; position <= ctx.size;) {
-                    const buffer = ctx.read(position, Math.min(chunkSize, ctx.size - position), false);
+                this.compReader.goto(start);
+
+                for (let position = start; position <= this.compReader.size;) {
+                    const buffer = this.compReader.read(position, Math.min(CHUNK_SIZE, this.compReader.size - position)) as Buffer;
 
                     if (buffer.length == 0) break;
 
@@ -505,6 +658,8 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                     position += buffer.length;
                 }
+
+                crc = crc >>> 0;
 
                 if (crc != this.CRC32) {
                     console.warn(`File DID NOT pass CRC32 check, may be corrupt. Expecting ${this.CRC32} but got ${crc}.`);
@@ -516,54 +671,70 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             if (this.tempCreated) {
                 totalSize = BigInt(this.compReader.size);
 
-                this.valueReader = new BiReaderStream(temp);
+                this.compReader.open();
 
-                this.valueReader.endian = this.endian;
+                this.valueReader = new BiReaderStream(this.fileName + ".comp");
 
-                this.strReader = new BiReaderStream(temp);
+                this.strReader = new BiReaderStream(this.fileName + ".comp");
 
-                this.strReader.endian = this.endian;
+                this.valueReader.fd = this.compReader.fd;
 
-                this.strReader.goto(Number(this.VALUE_SIZE));
+                this.valueReader.endian = this.compReader.endian;
+
+                this.valueReader.size = this.compReader.size;
+
+                this.valueReader.sizeB = this.compReader.sizeB;
+
+                this.valueReader.maxFileSize = this.compReader.maxFileSize;
+
+                this.strReader.fd = this.compReader.fd;
+
+                this.strReader.endian = this.compReader.endian;
+
+                this.strReader.size = this.compReader.size;
+
+                this.strReader.sizeB = this.compReader.sizeB;
+
+                this.strReader.maxFileSize = this.compReader.maxFileSize;
+                
+                this.strReader.offset = Number(this.VALUE_SIZE);
             } else {
                 totalSize = BigInt(this.compReader.size - this.HEADER_SIZE);
 
+                this.compReader.open();
+
                 this.valueReader = new BiReaderStream(this.fileName);
-
-                this.valueReader.endian = this.endian;
-
-                this.valueReader.goto(this.HEADER_SIZE);
 
                 this.strReader = new BiReaderStream(this.fileName);
 
-                this.strReader.endian = this.endian;
+                this.valueReader.fd = this.compReader.fd;
 
-                this.strReader.goto(this.HEADER_SIZE + Number(this.VALUE_SIZE));
+                this.valueReader.endian = this.compReader.endian;
+
+                this.valueReader.size = this.compReader.size;
+
+                this.valueReader.sizeB = this.compReader.sizeB;
+
+                this.valueReader.maxFileSize = this.compReader.maxFileSize;
+
+                this.valueReader.offset = this.HEADER_SIZE;
+
+                this.strReader.fd = this.compReader.fd;
+
+                this.strReader.endian = this.compReader.endian;
+
+                this.strReader.size = this.compReader.size;
+
+                this.strReader.sizeB = this.compReader.sizeB;
+
+                this.strReader.maxFileSize = this.compReader.maxFileSize;
+
+                this.strReader.offset = this.HEADER_SIZE + Number(this.VALUE_SIZE);
             }
 
             if (this.VALUE_SIZE + this.STR_SIZE != totalSize) {
                 console.warn(`File size DID NOT match headers, may be corrupt. Expecting ${this.VALUE_SIZE + this.STR_SIZE} but got ${totalSize}.`);
             }
-
-            this.compReader.open();
-
-            // Clone the readers.
-
-            this.valueReader.fd = this.compReader.fd;
-
-            this.valueReader.size = this.compReader.size;
-
-            this.valueReader.sizeB = this.compReader.sizeB;
-
-            this.valueReader.maxFileSize = this.compReader.maxFileSize;
-
-            this.strReader.fd = this.compReader.fd;
-
-            this.strReader.size = this.compReader.size;
-
-            this.strReader.sizeB = this.compReader.sizeB;
-
-            this.strReader.maxFileSize = this.compReader.maxFileSize;
         } else {
             if (this.buffer == null) {
                 throw new Error("Buffer not set");
@@ -582,7 +753,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             this.compReader.endian = this.endian;
 
             if (this.Encrypted) {
-                decomBuffer = this.decrypt("", decomBuffer);
+                decomBuffer = this.decrypt(null, decomBuffer);
 
                 this.compReader = new BiReader(decomBuffer);
 
@@ -596,7 +767,9 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 this.compReader.endian = this.endian;
             }
             if (this.Crc32) {
-                const crc = CRC32(this.compReader.data, 0);
+                const data = this.compReader.data as Buffer;
+
+                const crc = CRC32(data, 0) >>> 0;
 
                 if (crc != this.CRC32) {
                     console.warn(`File DID NOT pass CRC32 check, may be corrupt. Expecting ${this.CRC32} but got ${crc}.`);
@@ -708,15 +881,35 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         }
     };
 
-    private doDecodeSync(br: BiReader | BiReaderStream): unknown {
-        if (br == null) {
+    /**
+     * Runs a raw decode on the passed `BiReader`'s Buffer. Return data wherever it ends based on the start value.
+     * 
+     * @param reader - Reader
+     * @returns Decoded data
+     */
+    async doDecodeAsync(reader: BiReader | BiReaderStream): Promise<unknown>{
+        try{
+            return this.doDecodeSync(reader);
+        } catch (err){
+            throw new Error(err);
+        }
+    };
+
+    /**
+     * Runs a raw decode on the passed `BiReader`'s Buffer. Return data wherever it ends based on the start value.
+     * 
+     * @param reader - Reader
+     * @returns Decoded data
+     */
+    doDecodeSync(reader: BiReader | BiReaderStream): unknown {
+        if (reader == null) {
             throw new Error("Value reader not set.");
         }
 
         let object: unknown;
 
         DECODE: while (true) {
-            const headByte: number = br.ubyte;
+            const headByte: number = reader.ubyte;
             
             if (headByte < JPType.OBJECT_0) {
                 // positive fixint 0x00 - 0x7f
@@ -796,11 +989,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 var size = 0;
 
                 if (headByte === JPType.OBJECT8) {
-                    size = br.ubyte;
+                    size = reader.ubyte;
                 } else if (headByte === JPType.OBJECT16) {
-                    size = br.uint16;
+                    size = reader.uint16;
                 } else if (headByte === JPType.OBJECT32) {
-                    size = br.uint32;
+                    size = reader.uint32;
                 }
 
                 if (size !== 0) {
@@ -811,28 +1004,28 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     object = {};
                 }
             } else if (headByte === JPType.FLOAT32) {
-                object = br.float;
+                object = reader.float;
             } else if (headByte === JPType.FLOAT64) {
-                object = br.doublefloat;
+                object = reader.doublefloat;
             } else if (headByte === JPType.UINT_8) {
-                object = br.uint8;
+                object = reader.uint8;
             } else if (headByte === JPType.UINT_16) {
-                object = br.uint16;
+                object = reader.uint16;
             } else if (headByte === JPType.UINT_32) {
-                object = br.uint32;
+                object = reader.uint32;
             } else if (headByte === JPType.UINT_64) {
-                object = br.uint64; 
+                object = reader.uint64; 
                 if(this.enforceBigInt){
                     object = BigInt(object as number);
                 }
             } else if (headByte === JPType.INT_8) {
-                object = br.int8;
+                object = reader.int8;
             } else if (headByte === JPType.INT_16) {
-                object = br.int16;
+                object = reader.int16;
             } else if (headByte === JPType.INT_32) {
-                object = br.int32;
+                object = reader.int32;
             } else if (headByte === JPType.INT_64) {
-                object = br.int64; 
+                object = reader.int64; 
                 if(this.enforceBigInt){
                     object = BigInt(object as number);
                 }
@@ -841,11 +1034,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 var index = 0;
 
                 if (headByte === JPType.KEY8) {
-                    index = br.ubyte;
+                    index = reader.ubyte;
                 } else if (headByte === JPType.KEY16) {
-                    index = br.uint16;
+                    index = reader.uint16;
                 } else if (headByte === JPType.KEY32) {
-                    index = br.uint32;
+                    index = reader.uint32;
                 }
 
                 if (!this.keysArray[index]) {
@@ -858,11 +1051,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 var index = 0;
 
                 if (headByte === JPType.STR8) {
-                    index = br.ubyte;
+                    index = reader.ubyte;
                 } else if (headByte === JPType.STR16) {
-                    index = br.uint16;
+                    index = reader.uint16;
                 } else if (headByte === JPType.STR32) {
-                    index = br.uint32;
+                    index = reader.uint32;
                 }
 
                 if (this.stringsList[index] === undefined) {
@@ -877,11 +1070,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 var size = 0;
 
                 if (headByte === JPType.ARRAY8) {
-                    size = br.ubyte;
+                    size = reader.ubyte;
                 } else if (headByte === JPType.ARRAY16) {
-                    size = br.uint16;
+                    size = reader.uint16;
                 } else if (headByte === JPType.ARRAY32) {
-                    size = br.uint32;
+                    size = reader.uint32;
                 }
 
                 if (size !== 0) {
@@ -897,14 +1090,14 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 var size = 0;
 
                 if (headByte === JPType.EXT8) {
-                    size = br.ubyte;
+                    size = reader.ubyte;
                 } else if (headByte === JPType.EXT16) {
-                    size = br.uint16;
+                    size = reader.uint16;
                 } else if (headByte === JPType.EXT32) {
-                    size = br.uint32;
+                    size = reader.uint32;
                 }
 
-                const type = br.ubyte;
+                const type = reader.ubyte;
 
                 if(type == JPExtType.Maps){
                     if (size !== 0) {
@@ -923,7 +1116,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                         object = new Set();
                     }
                 } else {
-                    object = this.decodeExtension(br, size, type);
+                    object = this.decodeExtension(reader, size, type);
                 }
             } else if (headByte > JPType.EXT32) {
                 // negative fixint
@@ -1257,109 +1450,17 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
             br.endian = this.endian;
 
-            retValue = this.extensionCodec.decode(br, extType, this.context);
+            retValue = this.extensionCodec.decode(br, this, extType, this.context);
         }
 
         return retValue;
-    };
-
-    private checkFilePath(filePath: string): void {
-        var biTest: BiReaderStream | BiReader = new BiReaderStream(filePath);
-
-        const testBuffer = biTest.extract(40);
-
-        biTest.close();
-
-        biTest = new BiReader(testBuffer);
-
-        this.testHeader(biTest);
-
-        biTest.close();
-
-        if(!this.useStream){
-            this.buffer = fs.readFileSync(filePath);
-        }
-    };
-
-    private testHeader(br: BiReaderStream | BiReader) {
-        const MAGICS = br.uint16;
-
-        if (!(MAGICS == 0x504A || MAGICS == 0x4A50)) {
-            throw new Error(`File magics incorrect. Expecting 0x504A or 0x4A50, but got 0x${MAGICS.toString(16).padStart(4, "0")}`);
-        }
-
-        if (MAGICS == 0x4A50) {
-            this.endian = "big";
-        }
-
-        const V_MAJOR = br.uint8;
-
-        const V_MINOR = br.uint8;
-
-        this.HEADER_SIZE = br.uint8;
-
-        this.LargeFile = br.bit1 as bit;
-
-        this.Compressed = br.bit1 as bit;
-
-        this.Crc32 = br.bit1 as bit;
-
-        this.Encrypted = br.bit1 as bit;
-
-        this.EncryptionExcluded = br.bit1 as bit;
-
-        this.KeyStripped = br.bit1 as bit;
-
-        br.bit1;  // FLAG6
-
-        br.bit1;  // FLAG7
-
-        br.uint8;  // RESV_6 FLAG8-15
-
-        br.uint8;  // RESV_7 FLAG16-23
-
-        this.VALUE_SIZE = br.uint64;
-
-        this.STR_SIZE = br.uint64;
-
-        this.DATA_SIZE = br.uint64;
-
-        const V_NUMBER = parseFloat(`${V_MAJOR}.${V_MINOR}`);
-
-        if (V_NUMBER > VERSION_NUMBER) {
-            console.warn(`File was encoded in a more advanced version of this package which may cause issues. Package: ${VERSION_NUMBER} - File: ${V_NUMBER}`);
-        }
-
-        if (this.LargeFile && (br.size > MAX_BUFFER || (this.STR_SIZE + this.VALUE_SIZE) > MAX_BUFFER)) {
-            this.useStream = true;
-        }
-
-        if (this.EncryptionExcluded && this.encryptionKey == 0) {
-            throw new Error('The encryption key is not included in the file and the key was not set in the decoder. Can not decode.');
-        }
-
-        if (this.KeyStripped && this.keysArray.length == 0) {
-            throw new Error('The keysArray was removed from the file and not set in the decoder. Can not decode.');
-        }
-        // extra headers
-        if (this.Crc32) {
-            this.CRC32 = br.uint32;
-        }
-
-        if (this.Encrypted && !this.EncryptionExcluded) {
-            this.encryptionKey = br.uint32;
-        }
     };
 
     //////////////
     // FINALIZE //
     //////////////
 
-    private decrypt(filePath: string, buffer?:Buffer) {
-        if (this.fileReader == null) {
-            throw new Error("Can't decrypt without file.");
-        }
-
+    private decrypt(br?: BiWriterStream, buffer?:Buffer) {
         const cypter = new Crypt(this.encryptionKey);
 
         if (!this.useStream) {
@@ -1369,41 +1470,55 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
             return cypter.decrypt(buffer);
         } else {
-            const chunkSize = 16;
+            const CHUNK_SIZE = 16;
+            
+            br.open();
 
-            const br = new BiReaderStream(filePath);
+            br.gotoStart();
 
-            br.endian = this.endian;
+            var buff = Buffer.alloc(0);
 
-            const size = br.size;
+            let bytesToProcess = Number(this.DATA_SIZE);
 
-            for (let position = 0; position <= size;) {
-                const buffer = br.read(position, Math.min(chunkSize, br.size - position));
+            let bytesStart = 0;
 
-                if (buffer.length == 0) {
-                    br.data = cypter.decrypt_final();
-                    
-                    br.commit();
+            let bytesRead = 0;
 
-                    break;
+            do {
+                bytesRead = Math.min(CHUNK_SIZE, bytesToProcess);
+
+                if (bytesRead > 0) {
+                    buff = br.read(bytesStart, bytesRead) as Buffer;
+
+                    bytesToProcess -= buff.length;
+
+                    const data = cypter.decrypt_block(buff as Buffer);
+
+                    if(data.length != 0){
+                        br.overwrite(data, true);
+                    }
+
+                    bytesStart += buff.length;
+                } else {
+                    const data = cypter.decrypt_final();
+        
+                    if(data.length != 0){
+                        br.overwrite(data, true);
+                    }
+
+                    bytesToProcess = 0;
                 }
+            } while (bytesToProcess !== 0);
 
-                br.data = cypter.decrypt_block(buffer) as Buffer;
-
-                br.commit();
-
-                position += buffer.length;
-
-                if (position == size) {
-                     br.data = cypter.decrypt_final();
-
-                    br.commit();
+            if(!cypter.finished){
+                const data = cypter.decrypt_final();
+        
+                if(data.length != 0){
+                    br.overwrite(data, true);
                 }
             }
 
             br.trim();
-
-            br.close();
 
             return Buffer.alloc(0);
         }

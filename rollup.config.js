@@ -27,7 +27,7 @@ export default [
       jsonRollUp(),
       typescript({ tsconfig: './tsconfig.json' })
     ],
-    external: ['fs', 'buffer', "bireader"] // Node built-ins
+    external: ['fs', 'buffer', "bireader"]
   },
   // Types build
   {

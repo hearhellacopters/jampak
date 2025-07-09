@@ -24,16 +24,18 @@ Here is a breakdown of a sample file struture.
 import { JPEncode, JPDecode } from "jampak";
 
 const object = {
-  nil: null,
+  null: null,
   undefined: undefined,
   integer: 1,
   float: Math.PI,
+  bigint: BigInt(0x100000000),
   string: "Hello, world!",
   array: [10, 20, 30],
   object: { foo: "bar" },
-  setExt: new Set([50, 60, 70]),
   mapExt: new Map([["key1","data1"],["key2","data2"]]),
+  setExt: new Set([50, 60, 70]),
   symbolExt: Symbol("symbol"),
+  regexExt: /(regex)/g,
   uint8arrayExt: new Uint8Array([1, 2, 3]),
   dateExt: new Date()
 };
@@ -41,12 +43,16 @@ const object = {
 const encoder = new JPEncode();
 
 const encoded: Buffer = encoder.encode(object);
+
+const decoder = new JPDecode();
+
+const decoded = decoder.decode(encoded);
 ```
 
 ## Table of Contents
 
-- [Synopsis](#synopsis)
 - [How it works](#how-it-works)
+- [Synopsis](#synopsis)
 - [Table of Contents](#table-of-contents)
 - [Install](#install)
 - [API](#api)
@@ -376,15 +382,13 @@ ExtCodec.register({
   encode: (object, encoder, context) => {
     if (object instanceof MyType) {
       context.track(object);
-      const encoder = new JPEncode({ extensionCodec: ExtCodec, context: context });
-      return encoder.encode(object.toJSON());
+      return encoder.encodeObject(object.toJSON());
     } else {
       return null;
     }
   },
-  decode: (data, extType, context) => {
-    const decoder = new JPEncode({ extensionCodec: ExtCodec, context: context });
-    const decoded = decoder.decode(data);
+  decode: (data, decoder, extType, context) => {
+    const decoded = decoder.doDecodeSync(data);
     const my = new MyType(decoded);
     context.track(my);
     return my;

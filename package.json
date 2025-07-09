@@ -30,12 +30,11 @@
         }
     },
     "scripts": {
-        "build": "npm run clean && npm run build:esm && npm run build:cjs && tsc --emitDeclarationOnly && rollup -c && npm run copy",
-        "build:rollup": "npm run clean && tsc --emitDeclarationOnly && rollup -c && npm run copy",
+        "build": "npm run clean && npm run build:esm && npm run build:cjs && tsc --emitDeclarationOnly && rollup -c",
+        "build:rollup": "npm run clean && tsc --emitDeclarationOnly && rollup -c",
         "build:esm": "tsc -p tsconfig.esm.json",
         "build:cjs": "tsc -p tsconfig.cjs.json",
-        "clean": "rmdir /S /Q dist",
-        "copy": "copy \"package.json\" \"dist/package.json\""
+        "clean": "rmdir /S /Q dist"
     },
     "keywords": [
         "buffer",

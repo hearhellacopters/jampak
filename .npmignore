@@ -7,3 +7,4 @@ dist/*
 !dist/index.*
 *.bt
 test*
+rollup.config.js

@@ -28,7 +28,7 @@ const object = {
   undefined: undefined,
   integer: 1,
   float: Math.PI,
-  bigint: BigInt(0x100000000),
+  bigint: 0x100000000000000n,
   string: "Hello, world!",
   array: [10, 20, 30],
   object: { foo: "bar" },

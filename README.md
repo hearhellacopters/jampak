@@ -56,7 +56,7 @@ const decoded = decoder.decode(encoded);
 - [Table of Contents](#table-of-contents)
 - [Install](#install)
 - [API](#api)
-  - [`new JPEncode(options?: EncoderOptions)`](#new-jpencodeoptions-encoderoptions))
+  - [`new JPEncode(options?: EncoderOptions)`](#new-jpencodeoptions-encoderoptions)
     - [`EncoderOptions`](#encoderoptions)
     - [Class `JPEncode` functions](#class-jpencode-functions)
     - [Class `JPEncode` objects](#class-jpencode-objects)

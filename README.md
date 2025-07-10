@@ -166,7 +166,70 @@ console.log(object);
 | keysArray       | string[]            | []                                             | String array from when `stripKeys` was used during encoding. |
 | encryptionKey | number| undefined | 32 bit encryption key for when `stripEncryptKey` was enabled in encoding. |
 | enforceBigInt | boolean | false |  Ensures all 64 bit values return as `bigint` |
-| makeJSON | boolean | false | Forces the decoder to only return only a valid JSON object. |
+| makeJSON | boolean | false | Forces the decoder to only return only a valid JSON object. See table below for conversions. |
+
+#### Types to JSON table
+
+Type conversion when using `makeJSON` in the decoder.
+
+| Type                                            | Conversion |
+| ------------------------- | -------------------------------------------------- | 
+|`undefined`| `"undefined"` string|
+|`RegExp`| `{regexSrc: string, regexFlags: string}` object|
+|`symbol`|`{symbolGlobal: boolean, symbolKey: string}` object|
+|`bigint`|`number` if safe, otherwise `string`|
+|`Set`|`Array`|
+|`Map`|`Array[]`|
+
+Note: If you create [Extension Types](#extension-types), you must handle the conversion in your decode function.
+
+```typescript
+import { JPEncode, JPDecode } from "jampak";
+
+const object = {
+  null: null,
+  undefined: undefined,
+  integer: 1,
+  float: Math.PI,
+  bigint: 0x100000000000000n,
+  string: "Hello, world!",
+  array: [10, 20, 30],
+  object: { foo: "bar" },
+  mapExt: new Map([["key1","data1"],["key2","data2"]]),
+  setExt: new Set([50, 60, 70]),
+  symbolExt: Symbol("symbol"),
+  regexExt: /(regex)/g,
+  uint8arrayExt: new Uint8Array([1, 2, 3]),
+  dateExt: new Date()
+};
+
+const encoder = new JPEncode();
+
+const encoded: Buffer = encoder.encode(object);
+
+const decoder: new JPDecode({makeJSON: true});
+
+const object = decoder.decode(encoded);
+
+console.log(object);
+// {
+//   null: null,
+//   undefined: 'undefined',
+//   integer: 1,
+//   float: 3.141592653589793,
+//   bigint: '72057594037927936',
+//   string: 'Hello, world!',
+//   array: [ 10, 20, 30 ],
+//   object: { foo: 'bar' },
+//   mapExt: [ [ 'key1', 'data1' ], [ 'key2', 'data2' ] ],
+//   setExt: [ 50, 60, 70 ],
+//   symbolExt: { symbolGlobal: false, symbolKey: 'symbol' },
+//   regexExt: { regexSrc: '(regex)', regexFlags: 'g' },
+//   uint8arrayExt: { '0': 1, '1': 2, '2': 3 },
+//   bufferExt: { type: 'Buffer', data: [ 1, 2, 3 ] },
+//   dateExt: '2025-07-10T02:17:53.721Z'
+// }
+```
 
 #### Class `JPDecode` functions
 

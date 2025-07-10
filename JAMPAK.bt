@@ -3,13 +3,14 @@
 //
 //      File: JAMPAK.bt
 //   Authors: HearHellacopters
-//   Version: 1.0
+//   Version: 1.0.2
 //   Purpose: Storing JavaScript data in binary
 //  Category: Archive
 // File Mask: *.jpk
 //  ID Bytes: 
 //   History: 
-//   1.0      2025-07-01  Hellacopters: Made the original file   
+//   1.0      2025-07-01  Hellacopters: Made the original file  
+//   1.0.2    2025-07-01  Hellacopters: Updated size for unreadable Compressed or Encrypted files
 //------------------------------------------------
 
 enum <ubyte> JPType
@@ -533,7 +534,7 @@ struct{
     SetForeColor( cNone );
     uint64 VALUE_SIZE<comment="Size of value section.", fgcolor=cYellow>;
     uint64 STR_SIZE<comment="Size of string section.", fgcolor=cYellow>;
-    uint64 DATA_SIZE<comment="Total size of both sections, used when compressed or encrypted.", fgcolor=cYellow>;
+    uint64 DATA_SIZE<comment="Total size of both sections, used when compressed.", fgcolor=cYellow>;
     // HEADER_SIZE 32
     if(Crc32)
     {
@@ -565,5 +566,6 @@ if(!JAMPAK_HEADER.Compressed && !JAMPAK_HEADER.Encrypted){
     } VALUES<open=true>;
 } else {
     Printf("Can't parse Compressed or Encrypted files.");
-    ubyte data[JAMPAK_HEADER.DATA_SIZE]<fgcolor=cBlack, bgcolor=cWhite>;
+    local uint DATA_SIZE = FileSize() - FTell();
+    ubyte data[DATA_SIZE]<fgcolor=cBlack, bgcolor=cWhite>;
 };

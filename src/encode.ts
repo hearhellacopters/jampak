@@ -1,4 +1,3 @@
-import fs from "fs";
 import { Crypt, CRC32 } from './hash.js';
 import { BiWriter, BiWriterStream } from 'bireader';
 import { JPExtensionCodec, JPExtensionCodecType, JPExtData } from "./ext.js";
@@ -15,7 +14,6 @@ import {
     JPType,
     JPExtType,
     stringList,
-    MAX_BUFFER,
     JPBase,
     ContextOf
 } from './common.js';
@@ -26,6 +24,7 @@ import {
 export type EncoderOptions<ContextType = undefined> = Partial<
     Readonly<{
         extensionCodec?: JPExtensionCodecType<ContextType>;
+
         context?: ContextType;
         /**
          * Set the Endianness of the file.
@@ -233,7 +232,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             this.reinitializeState();
 
             if (this.valueWriter == null || this.strWriter == null) {
-                throw new Error("Didn't create writers");
+                throw new Error("Didn't create writers. " + this.fileName);
             }
 
             this.doEncode(this.valueWriter, object, 1);
@@ -261,7 +260,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             this.headerBuffer = this.buildHeader();
 
             if (this.compWriter == null) {
-                throw new Error("Didn't create writer.");
+                throw new Error("Didn't create writer. " + this.fileName);
             }
 
             if (!this.useStream) {
@@ -347,7 +346,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
                 return this.encodeObject(valueWriter, object as Record<string, unknown>, this.depth);
             } else {
                 // function and other special object come here unless extensionCodec handles them.
-                throw new Error(`Unrecognized object: ${Object.prototype.toString.apply(object)}`);
+                throw new Error(`Unrecognized object: ${Object.prototype.toString.apply(object)} ` + this.fileName);
             }
         }
     };
@@ -400,7 +399,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             length += 4;
         } else {
-            throw new Error(`Too large map object: ${size}`);
+            throw new Error(`Too large map object: ${size} in file ` + this.fileName);
         }
 
         for (const key of keys) {
@@ -456,7 +455,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             length += 4;
         } else {
-            throw new Error(`Too large array: ${size}`);
+            throw new Error(`Too large array: ${size} in file ` + this.fileName);
         }
 
         for (const item of array) {
@@ -508,7 +507,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
                 length += 4;
             } else {
-                throw new Error(`String index too long: ${index}`);
+                throw new Error(`String index too long: ${index} in file ` + this.fileName);
             }
         } else {
             const index = this.stringList.add(string);
@@ -537,7 +536,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
                 length += 4;
             } else {
-                throw new Error(`String index too long: ${index}`);
+                throw new Error(`String index too long: ${index} in file ` + this.fileName);
             }
         }
 
@@ -725,7 +724,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         var length = 1;
 
         if (this.strWriter == null) {
-            throw new Error("Didn't create writer.");
+            throw new Error("Didn't create writer. " + this.fileName);
         }
 
         if (byteLength < 16) {
@@ -753,14 +752,14 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             length += 4;
         } else {
-            throw new Error(`Too long string: ${byteLength} bytes in UTF-8`);
+            throw new Error(`Too long string: ${byteLength} bytes in UTF-8 in file ` + this.fileName);
         }
         return length;
     };
 
     private writeString(object: string) {
         if (this.strWriter == null) {
-            throw new Error("Didn't create writer.");
+            throw new Error("Didn't create writer. " + this.fileName);
         }
 
         const encoder = new TextEncoder();
@@ -782,7 +781,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         const size = array.length;
 
         if (this.strWriter == null) {
-            throw new Error("Didn't create writer.");
+            throw new Error("Didn't create writer. " + this.fileName);
         }
         if (size < 16) {
             // fixarray
@@ -803,7 +802,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             this.strWriter.uint32 = size;
         } else {
-            throw new Error(`String array too large: ${size}`);
+            throw new Error(`String array too large: ${size} in file ` + this.fileName);
         }
 
         for (let i = 0; i < size; i++) {
@@ -866,7 +865,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             length += 5;
         } else {
-            throw new Error(`Too large extension object: ${size}`);
+            throw new Error(`Too large extension object: ${size} in file ` + this.fileName);
         }
 
         valueWriter.ubyte = ext.type;
@@ -917,7 +916,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             length += 4;
         } else {
-            throw new Error(`Too large Set length: ${size}`);
+            throw new Error(`Too large Set length: ${size} in file ` + this.fileName);
         }
 
         this.valueWriter.ubyte = JPExtType.Maps; length++;
@@ -974,7 +973,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             length += 4;
         } else {
-            throw new Error(`Too large Set length: ${size}`);
+            throw new Error(`Too large Set length: ${size} in file ` + this.fileName);
         }
 
         this.valueWriter.ubyte = JPExtType.Sets;
@@ -1027,7 +1026,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             valueWriter.uint = length;
         } else {
-            throw new Error(`Too large Symbol length: ${length}`);
+            throw new Error(`Too large Symbol length: ${length} in file ` + this.fileName);
         }
 
         valueWriter.ubyte = JPExtType.Symbol;
@@ -1072,7 +1071,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             valueWriter.uint = length;
         } else {
-            throw new Error(`Too large RegEx length: ${length}`);
+            throw new Error(`Too large RegEx length: ${length} in file ` + this.fileName);
         }
 
         valueWriter.ubyte = JPExtType.RegEx;
@@ -1113,7 +1112,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             length += 4;
         } else {
-            throw new Error('Buffer ranged too large. ' + byteLength);
+            throw new Error(`Buffer ranged too large. ${byteLength} in file ` + this.fileName);
         }
 
         if (object instanceof Buffer) {
@@ -1149,7 +1148,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             } else if (object instanceof BigUint64Array) {
                 valueWriter.ubyte = JPExtType.BigUint64Array;
             } else {
-                throw new Error('Unknown Buffer type.');
+                throw new Error('Unknown Buffer type in file ' + this.fileName);
             }
 
             length++;
@@ -1311,7 +1310,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
     private finalizeBuffers() {
         if (this.strWriter == null || this.valueWriter == null) {
-            throw new Error("Didn't create writers.");
+            throw new Error("Didn't create writers. " + this.fileName);
         }
         if (!this.useStream) {
             this.valueWriter.trim();
@@ -1345,12 +1344,18 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             this.compWriter.trim();
         }
 
+        this.DATA_SIZE = BigInt(this.compWriter.size);
+
         if (this.Crc32) {
             this.CRC();
         }
+
         if (this.Compressed) {
             this.compress();
+
+            this.DATA_SIZE = BigInt(this.compWriter.size);
         }
+
         if (this.Encrypted) {
             this.encrypt(this.EncryptionExcluded ? true : false, this.encryptionKey == 0 ? undefined : this.encryptionKey);
         }
@@ -1370,7 +1375,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         this.EncryptionExcluded = EncryptionExcluded ? 1 : 0;
 
         if (this.compWriter == null) {
-            throw new Error("Writer not created for encryption.");
+            throw new Error("Writer not created for encryption. " + this.fileName);
         }
 
         const cypter = new Crypt(Encryptionkey);
@@ -1382,17 +1387,13 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             this.compWriter = new BiWriter(compBuffer);
 
-            if (this.HEADER_SIZE + this.compWriter.size > MAX_BUFFER) {
-                this.LargeFile = 1;
-            }
-
-            this.DATA_SIZE = this.compWriter.size;
-
-            return this.DATA_SIZE;
+            return this.compWriter.size;
         } else {
             const CHUNK_SIZE = 16; // 16 bytes at a time
 
             this.compWriter.gotoStart();
+
+            var data: Buffer;
 
             var buffer = Buffer.alloc(0);
 
@@ -1402,43 +1403,37 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             let bytesRead = 0;
 
-            do {
+            let amount = Math.ceil(this.compWriter.size / CHUNK_SIZE);
+
+            for (let index = 0; index < amount; index++) {
                 bytesRead = Math.min(CHUNK_SIZE, bytesToProcess);
 
-                if (bytesRead > 0) {
-                    buffer = this.compWriter.read(bytesStart, bytesRead) as Buffer;
+                buffer = this.compWriter.read(bytesStart, bytesRead) as Buffer;
 
-                    bytesToProcess -= buffer.length;
-
-                    const data = cypter.encrypt_block(buffer as Buffer);
-
-                    if(data.length != 0){
-                        this.compWriter.overwrite(data, true);
-                    }
-
-                    bytesStart += buffer.length;
+                if(index == (amount - 1)) {
+                    data = cypter.encrypt_block(buffer, true);
                 } else {
-                    const data = cypter.encrypt_final();
-
-                    if(data.length != 0){
-                        this.compWriter.overwrite(data, true);
-                    }
-
-                    bytesToProcess = 0;
+                    data = cypter.encrypt_block(buffer);
                 }
-            } while (bytesToProcess !== 0);
-
-            if(!cypter.finished){
-                const data = cypter.encrypt_final();
 
                 if(data.length != 0){
                     this.compWriter.overwrite(data, true);
                 }
+
+                bytesStart += buffer.length;
+
+                bytesToProcess -= buffer.length;
             }
 
-            this.DATA_SIZE = this.compWriter.size;
+            data = cypter.encrypt_final();
 
-            return this.DATA_SIZE;
+            if(data.length != 0){
+                this.compWriter.overwrite(data, true);
+            }
+
+            this.compWriter.trim();
+
+            return this.compWriter.size;
         }
     };
 
@@ -1449,7 +1444,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         this.Compressed = 1;
 
         if (this.compWriter == null) {
-            throw new Error("Writer not created for compression.");
+            throw new Error("Writer not created for compression. " + this.fileName);
         }
 
         if (!this.useStream) {
@@ -1460,11 +1455,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             this.compWriter = new BiWriter(compBuffer);
 
             this.compWriter.gotoEnd();
-
-            this.DATA_SIZE = this.compWriter.size;
         } else {
-            const HEADER_SIZE = this.HEADER_SIZE;
-
             const temp = this.fileName + ".comp.tmp";
 
             const tempcompWriter = new BiWriterStream(temp);
@@ -1479,13 +1470,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             this.compWriter.trim();
 
-            this.DATA_SIZE = this.compWriter.size;
-
             tempcompWriter.deleteFile();
-
-            if (HEADER_SIZE + this.compWriter.size > MAX_BUFFER) {
-                this.LargeFile = 1;
-            }
         }
     };
 
@@ -1496,7 +1481,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         this.Crc32 = 1;
 
         if (this.compWriter == null) {
-            throw new Error("Writer not created for CRC.");
+            throw new Error("Writer not created for CRC. " + this.fileName);
         }
 
         if (!this.useStream) {

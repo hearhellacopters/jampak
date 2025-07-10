@@ -642,6 +642,10 @@ declare class JPDecode<ContextType = undefined> extends JPBase {
      */
     hasExtensions: boolean;
     /**
+     * If the data is acceptable JSON data.
+     */
+    validJSON: boolean;
+    /**
      * Set up with basic options.
      *
      * @param {DecoderOptions?} options - options for decoding

@@ -27,6 +27,130 @@ type uint32 = number;
  */
 type uint64 = bigint;
 /**
+ * Internal index for values.
+ */
+declare enum JPType {
+    OBJECT_0 = 128,// = {} length
+    OBJECT_1 = 129,
+    OBJECT_2 = 130,
+    OBJECT_3 = 131,
+    OBJECT_4 = 132,
+    OBJECT_5 = 133,
+    OBJECT_6 = 134,
+    OBJECT_7 = 135,
+    OBJECT_8 = 136,
+    OBJECT_9 = 137,
+    OBJECT_10 = 138,
+    OBJECT_11 = 139,
+    OBJECT_12 = 140,
+    OBJECT_13 = 141,
+    OBJECT_14 = 142,
+    OBJECT_15 = 143,
+    ARRAY_0 = 144,// = [] length
+    ARRAY_1 = 145,
+    ARRAY_2 = 146,
+    ARRAY_3 = 147,
+    ARRAY_4 = 148,
+    ARRAY_5 = 149,
+    ARRAY_6 = 150,
+    ARRAY_7 = 151,
+    ARRAY_8 = 152,
+    ARRAY_9 = 153,
+    ARRAY_10 = 154,
+    ARRAY_11 = 155,
+    ARRAY_12 = 156,
+    ARRAY_13 = 157,
+    ARRAY_14 = 158,
+    ARRAY_15 = 159,
+    KEY_0 = 160,// Index. Only used when stripping keys, uses string otherwise
+    KEY_1 = 161,
+    KEY_2 = 162,
+    KEY_3 = 163,
+    KEY_4 = 164,
+    KEY_5 = 165,
+    KEY_6 = 166,
+    KEY_7 = 167,
+    KEY_8 = 168,
+    KEY_9 = 169,
+    KEY_10 = 170,
+    KEY_11 = 171,
+    KEY_12 = 172,
+    KEY_13 = 173,
+    KEY_14 = 174,
+    KEY_15 = 175,
+    STR_0 = 176,// = Index of the string in the string section, unless in the string section.
+    STR_1 = 177,
+    STR_2 = 178,
+    STR_3 = 179,
+    STR_4 = 180,
+    STR_5 = 181,
+    STR_6 = 182,
+    STR_7 = 183,
+    STR_8 = 184,
+    STR_9 = 185,
+    STR_10 = 186,
+    STR_11 = 187,
+    STR_12 = 188,
+    STR_13 = 189,
+    STR_14 = 190,
+    STR_15 = 191,
+    NULL = 192,
+    UNDEFINED = 193,
+    BOOL_FALSE = 194,
+    BOOL_TRUE = 195,
+    FINISHED = 196,// Kill byte
+    LIST_END = 197,// special ext type
+    UNUSED_C6 = 198,
+    OBJECT8 = 199,
+    OBJECT16 = 200,
+    OBJECT32 = 201,
+    FLOAT32 = 202,
+    FLOAT64 = 203,
+    UINT_8 = 204,
+    UINT_16 = 205,
+    UINT_32 = 206,
+    UINT_64 = 207,
+    INT_8 = 208,
+    INT_16 = 209,
+    INT_32 = 210,
+    INT_64 = 211,
+    KEY8 = 212,
+    KEY16 = 213,
+    KEY32 = 214,
+    STR8 = 215,
+    STR16 = 216,
+    STR32 = 217,
+    ARRAY8 = 218,
+    ARRAY16 = 219,
+    ARRAY32 = 220,
+    EXT8 = 221,
+    EXT16 = 222,
+    EXT32 = 223
+}
+/**
+ * Internal index for ext values.
+ */
+declare enum JPExtType {
+    Maps = 238,// Size here is the array size of Map, not the buffer size
+    Sets = 239,// Size here is the array size of Set, not the buffer size
+    Symbol = 240,// Has fixed bool and string read after.
+    RegEx = 241,// Two strings
+    BigUint64Array = 242,
+    BigInt64Array = 243,
+    Float64Array = 244,
+    Float32Array = 245,
+    Float16Array = 246,// not in use yet
+    Int32Array = 247,
+    Uint32Array = 248,
+    Uint16Array = 249,
+    Int16Array = 250,
+    Int8Array = 251,
+    Uint8Array = 252,
+    Uint8ClampedArray = 253,
+    Buffer = 254,
+    Date = 255
+}
+/**
  * File flags
  */
 type JPFlags = {
@@ -223,15 +347,15 @@ declare class JPBase {
      */
     get encryptionKey(): uint32;
     /**
-     * Check hash value. From value data on after decomp and decryption.
+     * Check hash value.
      */
     private _CRC32;
     /**
-     * Check hash value. From value data on after decomp and decryption.
+     * Check hash value.
      */
     set CRC32(value: number);
     /**
-     * Check hash value. From value data on after decomp and decryption.
+     * Check hash value.
      */
     get CRC32(): number;
     /**
@@ -242,6 +366,10 @@ declare class JPBase {
     keysArray: string[];
     entered: boolean;
     fileName: string;
+    errored: boolean;
+    errorMessage: string;
+    throwError(errorMessage: string): void;
+    addError(errorMessage: string): void;
 }
 
 /**
@@ -338,6 +466,7 @@ declare class JPEncode<ContextType = undefined> extends JPBase {
      * Build verion number to check the file creation params
      */
     get VERSION_MINOR(): ubyte;
+    CRC32Hash: number;
     /**
      * Set up with basic options
      *
@@ -646,6 +775,14 @@ declare class JPDecode<ContextType = undefined> extends JPBase {
      */
     validJSON: boolean;
     /**
+     * Computed CRC32 hash value.
+     */
+    CRC32Hash: number;
+    /**
+     * CRC32 Hash on file.
+     */
+    CRC32OnFile: number;
+    /**
      * Set up with basic options.
      *
      * @param {DecoderOptions?} options - options for decoding
@@ -655,13 +792,24 @@ declare class JPDecode<ContextType = undefined> extends JPBase {
     /**
      * Basic decoding, will run options that were set in constructor.
      *
-     * If passed a string, will assume it is a file path to read the file from.
+     * If passed a `string`, will assume it is a file path to read the file from.
      *
      * This will trigger a stream like mode where the whole file isn't loaded all at once for larger files.
      *
-     * @param bufferOrSourcePath - Buffer of the JamPack data or the file path to a JamPack file.
+     * @param bufferOrSourcePath - `Buffer` of the JamPack data or the file path to a JamPack file.
      */
     decode(bufferOrSourcePath: Buffer | ArrayLike<number> | Uint8Array<ArrayBufferLike> | ArrayBufferView | ArrayBufferLike | string): unknown;
+    /**
+     * Basic decoding, will run options that were set in constructor.
+     *
+     * If passed a `string`, will assume it is a file path to read the file from.
+     *
+     * This will trigger a stream like mode where the whole file isn't loaded all at once for larger files.
+     *
+     * @async
+     * @param bufferOrSourcePath - `Buffer` of the JamPack data or the file path to a JamPack file.
+     */
+    decodeAsync(bufferOrSourcePath: Buffer | ArrayLike<number> | Uint8Array<ArrayBufferLike> | ArrayBufferView | ArrayBufferLike | string): Promise<unknown>;
     private checkFilePath;
     private testHeader;
     /**
@@ -673,19 +821,23 @@ declare class JPDecode<ContextType = undefined> extends JPBase {
     private setBuffer;
     private createStringList;
     /**
-     * Runs a raw decode on the passed `BiReader`'s Buffer. Return data wherever it ends based on the start value.
+     * Runs a raw decode on the passed value buffer as `Buffer` or `BiReader`. Return data wherever it ends based on the start value.
      *
-     * @param reader - Reader
+     * NOTE: This function is for extention use, not direct use. Use `decodeAsync` instead.
+     *
+     * @param bufferOrReader - `Buffer` or `BiReader`
      * @returns Decoded data
      */
-    doDecodeAsync(reader: BiReader | BiReaderStream): Promise<unknown>;
+    doDecodeAsync(bufferOrReader: Buffer | BiReader | BiReaderStream): Promise<unknown>;
     /**
-     * Runs a raw decode on the passed `BiReader`'s Buffer. Return data wherever it ends based on the start value.
+     * Runs a raw decode on the passed value buffer as `Buffer` or `BiReader`. Return data wherever it ends based on the start value.
      *
-     * @param reader - Reader
+     * NOTE: This function is for extention use, not direct use. Use `decode` instead.
+     *
+     * @param bufferOrReader - `Buffer` or `BiReader`
      * @returns Decoded data
      */
-    doDecodeSync(reader: BiReader | BiReaderStream): unknown;
+    doDecodeSync(bufferOrReader: Buffer | BiReader | BiReaderStream): unknown;
     private pushMapState;
     private pushObjectState;
     private pushArrayState;
@@ -695,5 +847,5 @@ declare class JPDecode<ContextType = undefined> extends JPBase {
     private decrypt;
 }
 
-export { JPDecode, JPEncode, JPExtData, JPExtensionCodec };
-export type { DecoderOptions, EncoderOptions, JPExtensionCodecType, JPExtensionDecoderType, JPExtensionEncoderType, JPExtensionType };
+export { JPDecode, JPEncode, JPExtData, JPExtType, JPExtensionCodec, JPType };
+export type { BigValue, DecoderOptions, EncoderOptions, JPExtensionCodecType, JPExtensionDecoderType, JPExtensionEncoderType, JPExtensionType, endian };

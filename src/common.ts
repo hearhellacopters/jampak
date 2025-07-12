@@ -1,4 +1,3 @@
-import fs from "fs";
 import zlib from 'zlib';
 import { constants as bufferConstants } from "node:buffer";
 import {
@@ -287,104 +286,104 @@ export type float64 = number;
  * Internal index for values.
  */
 export enum JPType {
-    // 0x00 - 0x7F positive fixint 
-    OBJECT_0 = 0x80, // = {} length
-    OBJECT_1 = 0x81,
-    OBJECT_2 = 0x82,
-    OBJECT_3 = 0x83,
-    OBJECT_4 = 0x84,
-    OBJECT_5 = 0x85,
-    OBJECT_6 = 0x86,
-    OBJECT_7 = 0x87,
-    OBJECT_8 = 0x88,
-    OBJECT_9 = 0x89,
-    OBJECT_10 = 0x8A,
-    OBJECT_11 = 0x8B,
-    OBJECT_12 = 0x8C,
-    OBJECT_13 = 0x8D,
-    OBJECT_14 = 0x8E,
-    OBJECT_15 = 0x8F,
-    ARRAY_0 = 0x90, // = [] length
-    ARRAY_1 = 0x91,
-    ARRAY_2 = 0x92,
-    ARRAY_3 = 0x93,
-    ARRAY_4 = 0x94,
-    ARRAY_5 = 0x95,
-    ARRAY_6 = 0x96,
-    ARRAY_7 = 0x97,
-    ARRAY_8 = 0x98,
-    ARRAY_9 = 0x99,
-    ARRAY_10 = 0x9A,
-    ARRAY_11 = 0x9B,
-    ARRAY_12 = 0x9C,
-    ARRAY_13 = 0x9D,
-    ARRAY_14 = 0x9E,
-    ARRAY_15 = 0x9F,
-    KEY_0 = 0xA0, // Index. Only used when stripping keys, uses string otherwise
-    KEY_1 = 0xA1,
-    KEY_2 = 0xA2,
-    KEY_3 = 0xA3,
-    KEY_4 = 0xA4,
-    KEY_5 = 0xA5,
-    KEY_6 = 0xA6,
-    KEY_7 = 0xA7,
-    KEY_8 = 0xA8,
-    KEY_9 = 0xA9,
-    KEY_10 = 0xAA,
-    KEY_11 = 0xAB,
-    KEY_12 = 0xAC,
-    KEY_13 = 0xAD,
-    KEY_14 = 0xAE,
-    KEY_15 = 0xAF,
-    STR_0 = 0xB0, // = Index of the string in the string section, unless in the string section.
-    STR_1 = 0xB1,
-    STR_2 = 0xB2,
-    STR_3 = 0xB3,
-    STR_4 = 0xB4,
-    STR_5 = 0xB5,
-    STR_6 = 0xB6,
-    STR_7 = 0xB7,
-    STR_8 = 0xB8,
-    STR_9 = 0xB9,
-    STR_10 = 0xBA,
-    STR_11 = 0xBB,
-    STR_12 = 0xBC,
-    STR_13 = 0xBD,
-    STR_14 = 0xBE,
-    STR_15 = 0xBF,
-    NULL = 0xC0,
-    UNDEFINED = 0xC1,
+              // 0x00 - 0x7F positive fixint 
+    OBJECT_0   = 0x80, // = {} length
+    OBJECT_1   = 0x81,
+    OBJECT_2   = 0x82,
+    OBJECT_3   = 0x83,
+    OBJECT_4   = 0x84,
+    OBJECT_5   = 0x85,
+    OBJECT_6   = 0x86,
+    OBJECT_7   = 0x87,
+    OBJECT_8   = 0x88,
+    OBJECT_9   = 0x89,
+    OBJECT_10  = 0x8A,
+    OBJECT_11  = 0x8B,
+    OBJECT_12  = 0x8C,
+    OBJECT_13  = 0x8D,
+    OBJECT_14  = 0x8E,
+    OBJECT_15  = 0x8F,
+    ARRAY_0    = 0x90, // = [] length
+    ARRAY_1    = 0x91,
+    ARRAY_2    = 0x92,
+    ARRAY_3    = 0x93,
+    ARRAY_4    = 0x94,
+    ARRAY_5    = 0x95,
+    ARRAY_6    = 0x96,
+    ARRAY_7    = 0x97,
+    ARRAY_8    = 0x98,
+    ARRAY_9    = 0x99,
+    ARRAY_10   = 0x9A,
+    ARRAY_11   = 0x9B,
+    ARRAY_12   = 0x9C,
+    ARRAY_13   = 0x9D,
+    ARRAY_14   = 0x9E,
+    ARRAY_15   = 0x9F,
+    KEY_0      = 0xA0, // Index. Only used when stripping keys, uses string otherwise
+    KEY_1      = 0xA1,
+    KEY_2      = 0xA2,
+    KEY_3      = 0xA3,
+    KEY_4      = 0xA4,
+    KEY_5      = 0xA5,
+    KEY_6      = 0xA6,
+    KEY_7      = 0xA7,
+    KEY_8      = 0xA8,
+    KEY_9      = 0xA9,
+    KEY_10     = 0xAA,
+    KEY_11     = 0xAB,
+    KEY_12     = 0xAC,
+    KEY_13     = 0xAD,
+    KEY_14     = 0xAE,
+    KEY_15     = 0xAF,
+    STR_0      = 0xB0, // = Index of the string in the string section, unless in the string section.
+    STR_1      = 0xB1,
+    STR_2      = 0xB2,
+    STR_3      = 0xB3,
+    STR_4      = 0xB4,
+    STR_5      = 0xB5,
+    STR_6      = 0xB6,
+    STR_7      = 0xB7,
+    STR_8      = 0xB8,
+    STR_9      = 0xB9,
+    STR_10     = 0xBA,
+    STR_11     = 0xBB,
+    STR_12     = 0xBC,
+    STR_13     = 0xBD,
+    STR_14     = 0xBE,
+    STR_15     = 0xBF,
+    NULL       = 0xC0,
+    UNDEFINED  = 0xC1,
     BOOL_FALSE = 0xC2,
-    BOOL_TRUE = 0xC3,
-    FINISHED = 0xC4, // Kill byte
-    LIST_END = 0xC5, // special ext type
-    UNUSED_C6 = 0xC6,
-    OBJECT8 = 0xC7,
-    OBJECT16 = 0xC8,
-    OBJECT32 = 0xC9,
-    FLOAT32 = 0xCA,
-    FLOAT64 = 0xCB,
-    UINT_8 = 0xCC,
-    UINT_16 = 0xCD,
-    UINT_32 = 0xCE,
-    UINT_64 = 0xCF,
-    INT_8 = 0xD0,
-    INT_16 = 0xD1,
-    INT_32 = 0xD2,
-    INT_64 = 0xD3,
-    KEY8 = 0xD4,
-    KEY16 = 0xD5,
-    KEY32 = 0xD6,
-    STR8 = 0xD7,
-    STR16 = 0xD8,
-    STR32 = 0xD9,
-    ARRAY8 = 0xDA,
-    ARRAY16 = 0xDB,
-    ARRAY32 = 0xDC,
-    EXT8 = 0xDD,
-    EXT16 = 0xDE,
-    EXT32 = 0xDF,
-    // 0xE0 - 0xFF negative fixint 
+    BOOL_TRUE  = 0xC3,
+    FINISHED   = 0xC4, // Kill byte
+    LIST_END   = 0xC5, // special ext type
+    UNUSED_C6  = 0xC6,
+    OBJECT8    = 0xC7,
+    OBJECT16   = 0xC8,
+    OBJECT32   = 0xC9,
+    FLOAT32    = 0xCA,
+    FLOAT64    = 0xCB,
+    UINT_8     = 0xCC,
+    UINT_16    = 0xCD,
+    UINT_32    = 0xCE,
+    UINT_64    = 0xCF,
+    INT_8      = 0xD0,
+    INT_16     = 0xD1,
+    INT_32     = 0xD2,
+    INT_64     = 0xD3,
+    KEY8       = 0xD4,
+    KEY16      = 0xD5,
+    KEY32      = 0xD6,
+    STR8       = 0xD7,
+    STR16      = 0xD8,
+    STR32      = 0xD9,
+    ARRAY8     = 0xDA,
+    ARRAY16    = 0xDB,
+    ARRAY32    = 0xDC,
+    EXT8       = 0xDD,
+    EXT16      = 0xDE,
+    EXT32      = 0xDF,
+              // 0xE0 - 0xFF negative fixint 
 };
 
 /**
@@ -392,24 +391,24 @@ export enum JPType {
  */
 export enum JPExtType {
     // 0xD0 - 0xFF are reserve extend numbers
-    Maps = 0xEE, // Size here is the array size of Map, not the buffer size
-    Sets = 0xEF, // Size here is the array size of Set, not the buffer size
-    Symbol = 0xF0, // Has fixed bool and string read after.
-    RegEx = 0xF1, // Two strings
-    BigUint64Array = 0xF2,
-    BigInt64Array = 0xF3,
-    Float64Array = 0xF4,
-    Float32Array = 0xF5,
-    Float16Array = 0xF6, // not in use yet
-    Int32Array = 0xF7,
-    Uint32Array = 0xF8,
-    Uint16Array = 0xF9,
-    Int16Array = 0xFA,
-    Int8Array = 0xFB,
-    Uint8Array = 0xFC,
+    Maps              = 0xEE, // Size here is the array size of Map, not the buffer size
+    Sets              = 0xEF, // Size here is the array size of Set, not the buffer size
+    Symbol            = 0xF0, // Has fixed bool and string read after.
+    RegEx             = 0xF1, // Two strings
+    BigUint64Array    = 0xF2,
+    BigInt64Array     = 0xF3,
+    Float64Array      = 0xF4,
+    Float32Array      = 0xF5,
+    Float16Array      = 0xF6, // not in use yet
+    Int32Array        = 0xF7,
+    Uint32Array       = 0xF8,
+    Uint16Array       = 0xF9,
+    Int16Array        = 0xFA,
+    Int8Array         = 0xFB,
+    Uint8Array        = 0xFC,
     Uint8ClampedArray = 0xFD,
-    Buffer = 0xFE,
-    Date = 0xFF // MSGPACK Standard
+    Buffer            = 0xFE,
+    Date              = 0xFF // MSGPACK Standard
 };
 
 /**
@@ -619,7 +618,7 @@ export class JPBase {
 
             return this.headerBuffer.length;
         } else {
-            var HEADER_SIZE = 32;
+            let HEADER_SIZE = 32;
 
             if (this.Crc32) {
                 HEADER_SIZE += 4;
@@ -654,7 +653,6 @@ export class JPBase {
         if (this._VALUE_SIZE != 0n) {
             return this._VALUE_SIZE;
         } else if (this.valueWriter != null) {
-            this.valueWriter.get;
             this._VALUE_SIZE = BigInt(this.valueWriter.offset);
             return this._VALUE_SIZE;
         } else {
@@ -681,7 +679,6 @@ export class JPBase {
         if (this._STR_SIZE != 0n) {
             return this._STR_SIZE;
         } else if (this.strWriter != null) {
-            this.strWriter.get;
             this._STR_SIZE = BigInt(this.strWriter.offset);
             return this._STR_SIZE;
         } else {
@@ -866,19 +863,19 @@ export class JPBase {
     }
 
     /**
-     * Check hash value. From value data on after decomp and decryption.
+     * Check hash value.
      */
     private _CRC32: uint32 = 0;
 
     /**
-     * Check hash value. From value data on after decomp and decryption.
+     * Check hash value.
      */
     set CRC32(value: number) {
         this._CRC32 = value;
     }
 
     /**
-     * Check hash value. From value data on after decomp and decryption.
+     * Check hash value.
      */
     get CRC32() {
         return this._CRC32;
@@ -898,4 +895,20 @@ export class JPBase {
     entered = false;
 
     fileName = "";
+
+    errored = false;
+
+    errorMessage = "";
+
+    throwError(errorMessage: string){
+        this.errored = true;
+        this.errorMessage += errorMessage;
+        throw new Error(this.errorMessage);
+    };
+
+    addError(errorMessage: string){
+        this.errored = true;
+        this.errorMessage += errorMessage;
+        console.warn(this.errorMessage);
+    };
 };

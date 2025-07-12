@@ -399,6 +399,16 @@ export class JPDecode<ContextType = undefined> extends JPBase {
     validJSON = true;
 
     /**
+     * Computed CRC32 hash value.
+     */
+    CRC32Hash = 0;
+
+    /**
+     * CRC32 Hash on file.
+     */
+    CRC32OnFile = 0;
+
+    /**
      * Set up with basic options.
      * 
      * @param {DecoderOptions?} options - options for decoding
@@ -442,11 +452,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
     /**
      * Basic decoding, will run options that were set in constructor.
      * 
-     * If passed a string, will assume it is a file path to read the file from.
+     * If passed a `string`, will assume it is a file path to read the file from.
      * 
      * This will trigger a stream like mode where the whole file isn't loaded all at once for larger files.
      * 
-     * @param bufferOrSourcePath - Buffer of the JamPack data or the file path to a JamPack file.
+     * @param bufferOrSourcePath - `Buffer` of the JamPack data or the file path to a JamPack file.
      */
     public decode(bufferOrSourcePath: Buffer | ArrayLike<number> | Uint8Array<ArrayBufferLike> | ArrayBufferView | ArrayBufferLike | string): unknown {
         if (this.entered) {
@@ -469,7 +479,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             this.reinitializeState();
 
             if (this.valueReader == null) {
-                throw new Error("No value reader set. " + this.fileName);
+                this.throwError(" No value reader set. " + this.fileName);
             }
 
             this.stringsList = this.createStringList() as string[];
@@ -496,6 +506,26 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         }
     };
 
+    /**
+     * Basic decoding, will run options that were set in constructor.
+     * 
+     * If passed a `string`, will assume it is a file path to read the file from.
+     * 
+     * This will trigger a stream like mode where the whole file isn't loaded all at once for larger files.
+     * 
+     * @async
+     * @param bufferOrSourcePath - `Buffer` of the JamPack data or the file path to a JamPack file.
+     */
+    public async decodeAsync(bufferOrSourcePath: Buffer | ArrayLike<number> | Uint8Array<ArrayBufferLike> | ArrayBufferView | ArrayBufferLike | string): Promise<unknown> {
+        try {
+            return this.decode(bufferOrSourcePath);
+        } catch (err) {
+            console.error(err);
+
+            return;
+        }
+    };
+
     private checkFilePath(filePath: string): void {
         var biTest: BiReaderStream | BiReader = new BiReaderStream(filePath);
 
@@ -518,7 +548,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         const MAGICS = br.uint16;
 
         if (!(MAGICS == 0x504A || MAGICS == 0x4A50)) {
-            throw new Error(`File magics incorrect. Expecting 0x504A or 0x4A50, but got 0x${MAGICS.toString(16).padStart(4, "0")} ` + this.fileName);
+            this.throwError(` File magics incorrect. Expecting 0x504A or 0x4A50, but got 0x${MAGICS.toString(16).padStart(4, "0")} ` + this.fileName);
         }
 
         if (MAGICS == 0x4A50) {
@@ -560,7 +590,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         const V_NUMBER = parseFloat(`${V_MAJOR}.${V_MINOR}`);
 
         if (V_NUMBER > VERSION_NUMBER) {
-            console.warn(`File was encoded in a more advanced version of this package which may cause issues. Package: ${VERSION_NUMBER} - File: ${V_NUMBER} ` + this.fileName);
+            this.addError(` File was encoded in a more advanced version of this package which may cause issues. Package: ${VERSION_NUMBER} - File: ${V_NUMBER} ` + this.fileName);
         }
 
         if (this.LargeFile && (br.size > MAX_BUFFER || (this.STR_SIZE + this.VALUE_SIZE) > MAX_BUFFER)) {
@@ -568,15 +598,16 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         }
 
         if (this.EncryptionExcluded && this.encryptionKey == 0) {
-            throw new Error('The encryption key is not included in the file and the key was not set in the decoder. Can not decode. ' + this.fileName);
+            this.throwError(' The encryption key is not included in the file and the key was not set in the decoder. Can not decode. ' + this.fileName);
         }
 
         if (this.KeyStripped && this.keysArray.length == 0) {
-            throw new Error('The keysArray was removed from the file and not set in the decoder. Can not decode. ' + this.fileName);
+            this.throwError(' The keysArray was removed from the file and not set in the decoder. Can not decode. ' + this.fileName);
         }
         // extra headers
         if (this.Crc32) {
             this.CRC32 = br.uint32;
+            this.CRC32OnFile = this.CRC32;
         }
 
         if (this.Encrypted && !this.EncryptionExcluded) {
@@ -735,10 +766,10 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     position += buffer.length;
                 }
 
-                crc = crc >>> 0;
+                this.CRC32Hash = crc >>> 0;
 
-                if (crc != this.CRC32) {
-                    console.warn(`File DID NOT pass CRC32 check, may be corrupt. Expecting ${this.CRC32} but got ${crc}. ` + this.fileName);
+                if (this.CRC32Hash != this.CRC32OnFile) {
+                    this.addError(` File DID NOT pass CRC32 check, may be corrupt. Expecting ${this.CRC32OnFile} but got ${this.CRC32Hash}. ` + this.fileName);
                 }
             }
 
@@ -809,11 +840,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             }
 
             if (this.VALUE_SIZE + this.STR_SIZE != totalSize) {
-                console.warn(`File size DID NOT match headers, may be corrupt. Expecting ${this.VALUE_SIZE + this.STR_SIZE} but got ${totalSize}. ` + this.fileName);
+                this.addError(` File size DID NOT match headers, may be corrupt. Expecting ${this.VALUE_SIZE + this.STR_SIZE} but got ${totalSize}. ` + this.fileName);
             }
         } else {
             if (this.buffer == null) {
-                throw new Error("Buffer not set. " + this.fileName);
+                this.throwError(" Buffer not set. " + this.fileName);
             }
 
             this.fileReader = new BiReader(this.buffer);
@@ -829,7 +860,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             this.compReader.endian = this.endian;
 
             if (this.Encrypted) {
-                var finalSize = Number(this.VALUE_SIZE + this.STR_SIZE)
+                var finalSize = Number(this.VALUE_SIZE + this.STR_SIZE);
 
                 if (this.Compressed) {
                     finalSize = Number(this.DATA_SIZE);
@@ -851,15 +882,15 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             if (this.Crc32) {
                 const data = this.compReader.data as Buffer;
 
-                const crc = CRC32(data, 0) >>> 0;
+                this.CRC32Hash = CRC32(data, 0) >>> 0;
 
-                if (crc != this.CRC32) {
-                    console.warn(`File DID NOT pass CRC32 check, may be corrupt. Expecting ${this.CRC32} but got ${crc}. ` + this.fileName);
+                if (this.CRC32Hash != this.CRC32OnFile) {
+                    this.addError(` File DID NOT pass CRC32 check, may be corrupt. Expecting ${this.CRC32OnFile} but got ${this.CRC32Hash}. ` + this.fileName);
                 }
             }
 
             if (this.VALUE_SIZE + this.STR_SIZE != BigInt(this.compReader.size)) {
-                console.warn(`File size DID NOT match headers, may be corrupt. Expecting ${this.VALUE_SIZE + this.STR_SIZE} but got ${this.compReader.size}. ` + this.fileName);
+                this.addError(` File size DID NOT match headers, may be corrupt. Expecting ${this.VALUE_SIZE + this.STR_SIZE} but got ${this.compReader.size}. ` + this.fileName);
             }
 
             this.valueReader = new BiReader(this.compReader.extract(Number(this.VALUE_SIZE), true));
@@ -886,7 +917,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
     private createStringList() {
         if (this.strReader == null) {
-            throw new Error("string reader not set. " + this.fileName);
+            this.throwError(" string reader not set. " + this.fileName);
         }
 
         DECODE: while (true) {
@@ -933,7 +964,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 object = this.strReader.string({ length: size });
             } else {
-                throw new Error(`Invalid data in string area. 0x${headByte.toString(16).padStart(2, "0")} ` + this.fileName);
+                this.throwError(` Invalid data in string area. 0x${headByte.toString(16).padStart(2, "0")} ` + this.fileName);
             }
 
             const stack = this.stack;
@@ -955,7 +986,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                         continue DECODE;
                     }
                 } else {
-                    throw new Error('Should only have an array in the string data, found type ' + state.type + " in file " + this.fileName);
+                    this.throwError(' Should only have an array in the string data, found type ' + state.type + " in file " + this.fileName);
                 }
             }
 
@@ -964,12 +995,30 @@ export class JPDecode<ContextType = undefined> extends JPBase {
     };
 
     /**
-     * Runs a raw decode on the passed `BiReader`'s Buffer. Return data wherever it ends based on the start value.
+     * Runs a raw decode on the passed value buffer as `Buffer` or `BiReader`. Return data wherever it ends based on the start value.
      * 
-     * @param reader - Reader
+     * NOTE: This function is for extention use, not direct use. Use `decodeAsync` instead.
+     * 
+     * @param bufferOrReader - `Buffer` or `BiReader`
      * @returns Decoded data
      */
-    async doDecodeAsync(reader: BiReader | BiReaderStream): Promise<unknown>{
+    async doDecodeAsync(bufferOrReader: Buffer | BiReader | BiReaderStream): Promise<unknown>{
+        var reader = bufferOrReader;
+        
+        if(reader instanceof Buffer){
+            reader = new BiReader(reader);
+
+            reader.endian = this.endian;
+        }
+
+        if(!(reader instanceof BiReader || reader instanceof BiReaderStream) || reader == null){
+            this.throwError(" Value reader not set. " + this.fileName);
+        }
+
+        if(this.strReader == null){
+            this.throwError(" String reader not set. " + this.fileName);
+        }
+
         try{
             return this.doDecodeSync(reader);
         } catch (err){
@@ -978,16 +1027,32 @@ export class JPDecode<ContextType = undefined> extends JPBase {
     };
 
     /**
-     * Runs a raw decode on the passed `BiReader`'s Buffer. Return data wherever it ends based on the start value.
+     * Runs a raw decode on the passed value buffer as `Buffer` or `BiReader`. Return data wherever it ends based on the start value.
      * 
-     * @param reader - Reader
+     * NOTE: This function is for extention use, not direct use. Use `decode` instead.
+     * 
+     * @param bufferOrReader - `Buffer` or `BiReader`
      * @returns Decoded data
      */
-    doDecodeSync(reader: BiReader | BiReaderStream): unknown {
-        if (reader == null) {
-            throw new Error("Value reader not set. " + this.fileName);
+    doDecodeSync(bufferOrReader: Buffer | BiReader | BiReaderStream): unknown {
+        var reader = bufferOrReader;
+
+        if(reader instanceof Buffer){
+            reader = new BiReader(reader);
+
+            reader.endian = this.endian;
         }
 
+        if(!(reader instanceof BiReader || reader instanceof BiReaderStream) || reader == null){
+            this.throwError(" Value reader not set. " + this.fileName);
+        }
+
+        if(this.strReader == null){
+            this.throwError(" String reader not set. " + this.fileName);
+        }
+
+        reader = reader as BiReader;
+    
         let object: unknown;
 
         DECODE: while (true) {
@@ -1023,7 +1088,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 const index = headByte - 0xA0;
 
                 if (!this.keysArray[index]) {
-                    console.warn(`Did not find key value for index ` + index + " in file " + this.fileName);
+                    this.addError( `Did not find key value for index ` + index + " in file " + this.fileName);
                 }
 
                 object = this.keysArray[index];
@@ -1032,9 +1097,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 const index = headByte - 0xB0;
 
                 if (this.stringsList[index] === undefined) {
-                    console.warn(`Did not find string value for index ` + index + " in file " + this.fileName);
-
-                    console.debug(this.stringsList);
+                    this.addError(` Did not find string value for index ` + index + " in file " + this.fileName);
                 }
 
                 object = this.stringsList[index];
@@ -1131,7 +1194,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 }
 
                 if (!this.keysArray[index]) {
-                    console.warn(`Did not find key value for index ` + index + " in file " + this.fileName);
+                    this.addError(` Did not find key value for index ` + index + " in file " + this.fileName);
                 }
 
                 object = this.keysArray[index];
@@ -1148,9 +1211,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 }
 
                 if (this.stringsList[index] === undefined) {
-                    console.warn(`Did not find string value for index ` + index + " in file " + this.fileName);
-
-                    console.debug(this.stringsList);
+                    this.addError(` Did not find string value for index ` + index + " in file " + this.fileName);
                 }
 
                 object = this.stringsList[index];
@@ -1213,7 +1274,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 // negative fixint
                 object = headByte - 0x100;
             } else {
-                throw new Error(`Outside of index error 0x${headByte.toString(16).padStart(2, "0")} `+ this.fileName);
+                this.throwError(` Outside of index error 0x${headByte.toString(16).padStart(2, "0")} `+ this.fileName);
             }
 
             const stack = this.stack;
@@ -1247,7 +1308,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     }
                 } else if (state.type === STATE_OBJECT_KEY) {
                     if (object === "__proto__") {
-                        throw new Error("The key __proto__ is not allowed " + this.fileName);
+                        this.throwError(" The key __proto__ is not allowed " + this.fileName);
                     }
 
                     state.key = this.mapKeyConverter(object);
@@ -1273,7 +1334,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     }
                 } else if (state.type === STATE_MAP_KEY) {
                     if (object === "__proto__") {
-                        throw new Error("The key __proto__ is not allowed " + this.fileName);
+                        this.throwError(" The key __proto__ is not allowed " + this.fileName);
                     }
 
                     state.key = this.mapKeyConverter(object);
@@ -1323,7 +1384,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
     private readString(headByte: number) {
         if (this.valueReader == null) {
-            throw new Error("Value reader not set. " + this.fileName);
+            this.throwError(" Value reader not set. " + this.fileName);
         }
 
         var value = "";
@@ -1343,9 +1404,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 index = this.valueReader.uint32;
             }
             if (this.stringsList[index] === undefined) {
-                console.warn(`Did not find string value for index ` + index + " in file " + this.fileName);
-
-                console.debug(this.stringsList);
+                this.addError(` Did not find string value for index ` + index + " in file " + this.fileName);
             } else {
                 value = this.stringsList[index];
             }
@@ -1531,7 +1590,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                         retValue = new Date(sec * 1e3 + nsec / 1e6);
                     }
                     default:
-                        throw new Error(`Unrecognized data size for timestamp (expected 4, 8, or 12): ${br.size} in file ` + this.fileName);
+                        this.throwError(` Unrecognized data size for timestamp (expected 4, 8, or 12): ${br.size} in file ` + this.fileName);
                 }
                 break;
             default:
@@ -1561,13 +1620,13 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
         if (!this.useStream) {
             if(buffer == null){
-                throw new Error("Buffer to decrypt not set. " + this.fileName);
+                this.throwError(" Buffer to decrypt not set. " + this.fileName);
             }
 
             const decrypted = cypter.decrypt(buffer);
 
             if(decrypted.length != finalSize){
-                console.warn(`Decrypted buffer size of ${decrypted.length} wasn't expected size of ${finalSize}  in file ` + this.fileName);
+                this.addError(` Decrypted buffer size of ${decrypted.length} wasn't expected size of ${finalSize}  in file ` + this.fileName);
             }
 
             return decrypted;
@@ -1594,6 +1653,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 bytesRead = Math.min(CHUNK_SIZE, bytesToProcess);
 
                 buff = br.read(bytesStart, bytesRead) as Buffer;
+
                 if(index == (amount - 1)) {
                     data = cypter.decrypt_block(buff, true);
                 } else {
@@ -1618,7 +1678,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             br.trim();
 
             if(br.size != finalSize){
-                console.warn(`Decrypted buffer size of ${br.size} wasn't expected size of ${finalSize} in file 1 + this.fileName`);
+                this.addError(` Decrypted buffer size of ${br.size} wasn't expected size of ${finalSize} in file 1 + this.fileName`);
             }
 
             return Buffer.alloc(0);

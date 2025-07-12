@@ -22,15 +22,15 @@ class RandomXorShift {
         }
         if (typeof Buffer !== 'undefined' && seed instanceof Buffer) {
             if (seed.length < 4) {
-                throw new Error("Must be a seed Buffer of 4 bytes")
+                throw new Error("Must be a seed Buffer of 4 bytes");
             }
             mt[0] = seed.readUInt32LE() >>> 0;
         } else {
             if (seed instanceof Uint8Array) {
                 if (seed.length < 4) {
-                    throw new Error("Must be a seed Uint8Array of 4 bytes")
+                    throw new Error("Must be a seed Uint8Array of 4 bytes");
                 }
-                mt[0] = ((seed[3] << 24) | (seed[2] << 16) | (seed[1] << 8) | seed[0])
+                mt[0] = ((seed[3] << 24) | (seed[2] << 16) | (seed[1] << 8) | seed[0]);
             } else {
                 if (typeof seed == "number") {
                     mt[0] = seed >>> 0;
@@ -58,8 +58,8 @@ class RandomXorShift {
      * @returns number
      */
     random_int(): number {
-        let v1 = ((this.mt[3] << 24) | (this.mt[2] << 16) | (this.mt[1] << 8) | this.mt[0])
-        let v4 = ((this.mt[15] << 24) | (this.mt[14] << 16) | (this.mt[13] << 8) | this.mt[12])
+        let v1 = ((this.mt[3] << 24) | (this.mt[2] << 16) | (this.mt[1] << 8) | this.mt[0]);
+        let v4 = ((this.mt[15] << 24) | (this.mt[14] << 16) | (this.mt[13] << 8) | this.mt[12]);
         let comp_1 = (v4 ^ (v4 >>> 19) ^ v1 ^ (v1 << 11) ^ ((v1 ^ (v1 << 11)) >>> 8)) >>> 0;
         let new_value = new Uint8Array(4);
         new_value[0] = comp_1 & 0xFF;
@@ -473,7 +473,7 @@ class AES {
             for (var j = 0; j < 4; j++)
                 key[i + j] = key[i + j - kl] ^ temp[j];
         }
-        this.key_set = true
+        this.key_set = true;
 
         //setup
         for (var z = 0; z < 256; z++) {
@@ -634,7 +634,7 @@ class AES {
             return_buff.push(return_block);
         }
         var final_buffer = Buffer.concat(return_buff);
-        this.iv_set = false
+        this.iv_set = false;
         return final_buffer;
     };
 
@@ -727,7 +727,7 @@ class ARIA {
             this.mKeyLength = 0;
         }
         this.scheduleKey(key);
-        this.key_set = true
+        this.key_set = true;
     }
 
     /**
@@ -868,8 +868,8 @@ class ARIA {
 
     XOR(x: Buffer, y: Buffer): Buffer {
         var length = x.length;
-        var result = Buffer.alloc(length)
-        result.set(x)
+        var result = Buffer.alloc(length);
+        result.set(x);
         var i = 0;
         while ((i < length && i < y.length)) {
             {
@@ -886,7 +886,7 @@ class ARIA {
         var result =  Buffer.alloc(nBytes);
         nShift = nShift % (nBytes * 8);
         if (nShift === 0) {
-            result.set(array)
+            result.set(array);
         }
         else {
             var byteOffset = (nShift / 8 | 0);
@@ -913,7 +913,7 @@ class ARIA {
     };
 
     private SL1(array: Buffer): Buffer {
-        var result =  Buffer.alloc(16)
+        var result =  Buffer.alloc(16);
         result[0] = this.SB1_$LI$()[this.unsigned(array[0])];
         result[1] = this.SB2_$LI$()[this.unsigned(array[1])];
         result[2] = this.SB3_$LI$()[this.unsigned(array[2])];
@@ -934,7 +934,7 @@ class ARIA {
     };
 
     private SL2(array: Buffer): Buffer {
-        var result = Buffer.alloc(16)
+        var result = Buffer.alloc(16);
         result[0] = this.SB3_$LI$()[this.unsigned(array[0])];
         result[1] = this.SB4_$LI$()[this.unsigned(array[1])];
         result[2] = this.SB1_$LI$()[this.unsigned(array[2])];
@@ -966,7 +966,7 @@ class ARIA {
     private A(b: Buffer): Buffer {
         var length = b.length;
         if (length !== 16) {
-            throw new Error("Illegal input size. Diffusion layer should take 16-byte string as parameter.")
+            throw new Error("Illegal input size. Diffusion layer should take 16-byte string as parameter.");
         }
         else {
             var result = Buffer.alloc(16);
@@ -1011,14 +1011,14 @@ class ARIA {
             CK3 = this.C2_$LI$();
             this.mNumberRounds = 16;
         } else {
-            throw new Error("Illegal key length. Only 128, 192 and 256 bit keys are valid.")
+            throw new Error("Illegal key length. Only 128, 192 and 256 bit keys are valid.");
         }
         var W0 = key.subarray(0, 16);
-        var KR = (this.mKeyLength > 16) ? extendBuffer(key.subarray(16, key.length), 16, 0) : Buffer.alloc(16)
+        var KR = (this.mKeyLength > 16) ? extendBuffer(key.subarray(16, key.length), 16, 0) : Buffer.alloc(16);
         var W1 = this.XOR(this.FO(W0, CK1), KR);
         var W2 = this.XOR(this.FE(W1, CK2), W0);
         var W3 = this.XOR(this.FO(W2, CK3), W1);
-        this.mEK = new Array(17)
+        this.mEK = new Array(17);
         this.mEK[0] = this.XOR(W0, this.ROR(W1, 19));
         this.mEK[1] = this.XOR(W1, this.ROR(W2, 19));
         this.mEK[2] = this.XOR(W2, this.ROR(W3, 19));
@@ -1036,7 +1036,7 @@ class ARIA {
         this.mEK[14] = this.XOR(W2, this.ROL(W3, 31));
         this.mEK[15] = this.XOR(this.ROL(W0, 31), W3);
         this.mEK[16] = this.XOR(W0, this.ROL(W1, 19));
-        this.mDK = new Array(this.mNumberRounds + 1)
+        this.mDK = new Array(this.mNumberRounds + 1);
         this.mDK[0] = this.mEK[this.mNumberRounds];
         for (var i = 1; i < this.mNumberRounds; i++) {
             this.mDK[i] = this.A(this.mEK[this.mNumberRounds - i]);
@@ -1054,7 +1054,7 @@ class ARIA {
             text = xor(text, this.iv);
         }
 
-        var keys = this.mEK
+        var keys = this.mEK;
         var length = text.length;
         var result = Buffer.alloc(length);
         var block = Buffer.alloc(this.mKeyLength);
@@ -1107,10 +1107,10 @@ class ARIA {
         }
         this.previous_block = text;
 
-        var keys = this.mDK
+        var keys = this.mDK;
         var length = text.length;
-        var result = Buffer.alloc(length)
-        var block = Buffer.alloc(this.mKeyLength)
+        var result = Buffer.alloc(length);
+        var block = Buffer.alloc(this.mKeyLength);
         var nBlocks = (length / this.mKeyLength | 0);
         for (var i = 0; i < nBlocks; i++) {
             {
@@ -1199,7 +1199,7 @@ class ARIA {
             return_buff.push(return_block);
         }
         var final_buffer = Buffer.concat(return_buff);
-        this.iv_set = false
+        this.iv_set = false;
         return final_buffer;
     };
 
@@ -1920,7 +1920,7 @@ class CAMELLIA {
             }
         }
         var final_buffer = Buffer.concat(return_buff);
-        this.iv_set = false
+        this.iv_set = false;
         return final_buffer;
     };
 

@@ -351,6 +351,16 @@ function extendBuffer(array: Buffer, newLength: number, padValue: number): Buffe
     return array;
 };
 
+function padd_block(data:Buffer){
+    const block_size = 16;
+    if (data.length % block_size != 0) {
+        var padd_value = block_size - (data.length % block_size);
+        var paddbuffer = Buffer.alloc(padd_value, padd_value & 0xFF);
+        data = Buffer.concat([data, paddbuffer]);
+    }
+    return data;
+};
+
 class AES {
     public key: any;
     public key_set: boolean = false;
@@ -514,7 +524,7 @@ class AES {
         //check if IV is set, if so runs CBC
         let block = start_chunk;
         if(last_block){
-            block = this.padd_block(start_chunk);
+            block = padd_block(start_chunk);
         }
         if (this.iv_set == true) {
             block = xor(block, this.iv);
@@ -589,16 +599,6 @@ class AES {
             return removePKCSPadding(return_buffer, padd_value, true);
         }
         return return_buffer;
-    };
-
-    private padd_block(data:Buffer){
-        const block_size = 16;
-        if (data.length % block_size != 0) {
-            var padd_value = block_size - (data.length % block_size);
-            var paddbuffer = Buffer.alloc(padd_value, padd_value & 0xFF);
-            data = Buffer.concat([data, paddbuffer]);
-        }
-        return data;
     };
 
     /**
@@ -683,487 +683,463 @@ class AES {
     };
 };
 
-class ARIA {
-    public key: Buffer | null;
-    public key_set: boolean = false;
-    public iv: Buffer | null;
-    public iv_set: boolean = false;
+export class ARIA {
+    // Constants
+    ARIA_BLOCK_SIZE = 16;
 
-    private previous_block: Buffer | null;
+    // S-box 1
+    sb1: Buffer = Buffer.from([
+        0x63, 0x7C, 0x77, 0x7B, 0xF2, 0x6B, 0x6F, 0xC5, 0x30, 0x01, 0x67, 0x2B, 0xFE, 0xD7, 0xAB, 0x76,
+        0xCA, 0x82, 0xC9, 0x7D, 0xFA, 0x59, 0x47, 0xF0, 0xAD, 0xD4, 0xA2, 0xAF, 0x9C, 0xA4, 0x72, 0xC0,
+        0xB7, 0xFD, 0x93, 0x26, 0x36, 0x3F, 0xF7, 0xCC, 0x34, 0xA5, 0xE5, 0xF1, 0x71, 0xD8, 0x31, 0x15,
+        0x04, 0xC7, 0x23, 0xC3, 0x18, 0x96, 0x05, 0x9A, 0x07, 0x12, 0x80, 0xE2, 0xEB, 0x27, 0xB2, 0x75,
+        0x09, 0x83, 0x2C, 0x1A, 0x1B, 0x6E, 0x5A, 0xA0, 0x52, 0x3B, 0xD6, 0xB3, 0x29, 0xE3, 0x2F, 0x84,
+        0x53, 0xD1, 0x00, 0xED, 0x20, 0xFC, 0xB1, 0x5B, 0x6A, 0xCB, 0xBE, 0x39, 0x4A, 0x4C, 0x58, 0xCF,
+        0xD0, 0xEF, 0xAA, 0xFB, 0x43, 0x4D, 0x33, 0x85, 0x45, 0xF9, 0x02, 0x7F, 0x50, 0x3C, 0x9F, 0xA8,
+        0x51, 0xA3, 0x40, 0x8F, 0x92, 0x9D, 0x38, 0xF5, 0xBC, 0xB6, 0xDA, 0x21, 0x10, 0xFF, 0xF3, 0xD2,
+        0xCD, 0x0C, 0x13, 0xEC, 0x5F, 0x97, 0x44, 0x17, 0xC4, 0xA7, 0x7E, 0x3D, 0x64, 0x5D, 0x19, 0x73,
+        0x60, 0x81, 0x4F, 0xDC, 0x22, 0x2A, 0x90, 0x88, 0x46, 0xEE, 0xB8, 0x14, 0xDE, 0x5E, 0x0B, 0xDB,
+        0xE0, 0x32, 0x3A, 0x0A, 0x49, 0x06, 0x24, 0x5C, 0xC2, 0xD3, 0xAC, 0x62, 0x91, 0x95, 0xE4, 0x79,
+        0xE7, 0xC8, 0x37, 0x6D, 0x8D, 0xD5, 0x4E, 0xA9, 0x6C, 0x56, 0xF4, 0xEA, 0x65, 0x7A, 0xAE, 0x08,
+        0xBA, 0x78, 0x25, 0x2E, 0x1C, 0xA6, 0xB4, 0xC6, 0xE8, 0xDD, 0x74, 0x1F, 0x4B, 0xBD, 0x8B, 0x8A,
+        0x70, 0x3E, 0xB5, 0x66, 0x48, 0x03, 0xF6, 0x0E, 0x61, 0x35, 0x57, 0xB9, 0x86, 0xC1, 0x1D, 0x9E,
+        0xE1, 0xF8, 0x98, 0x11, 0x69, 0xD9, 0x8E, 0x94, 0x9B, 0x1E, 0x87, 0xE9, 0xCE, 0x55, 0x28, 0xDF,
+        0x8C, 0xA1, 0x89, 0x0D, 0xBF, 0xE6, 0x42, 0x68, 0x41, 0x99, 0x2D, 0x0F, 0xB0, 0x54, 0xBB, 0x16
+    ]);
 
-    private C1: Buffer | null;
-    private C2: Buffer | null;
-    private C3: Buffer | null;
-    private SB1: Buffer | null;
-    private SB2: Buffer | null;
-    private SB3: Buffer | null;
-    private SB4: Buffer | null;
+    // S-box 2
+    sb2: Buffer = Buffer.from([
+        0xE2, 0x4E, 0x54, 0xFC, 0x94, 0xC2, 0x4A, 0xCC, 0x62, 0x0D, 0x6A, 0x46, 0x3C, 0x4D, 0x8B, 0xD1,
+        0x5E, 0xFA, 0x64, 0xCB, 0xB4, 0x97, 0xBE, 0x2B, 0xBC, 0x77, 0x2E, 0x03, 0xD3, 0x19, 0x59, 0xC1,
+        0x1D, 0x06, 0x41, 0x6B, 0x55, 0xF0, 0x99, 0x69, 0xEA, 0x9C, 0x18, 0xAE, 0x63, 0xDF, 0xE7, 0xBB,
+        0x00, 0x73, 0x66, 0xFB, 0x96, 0x4C, 0x85, 0xE4, 0x3A, 0x09, 0x45, 0xAA, 0x0F, 0xEE, 0x10, 0xEB,
+        0x2D, 0x7F, 0xF4, 0x29, 0xAC, 0xCF, 0xAD, 0x91, 0x8D, 0x78, 0xC8, 0x95, 0xF9, 0x2F, 0xCE, 0xCD,
+        0x08, 0x7A, 0x88, 0x38, 0x5C, 0x83, 0x2A, 0x28, 0x47, 0xDB, 0xB8, 0xC7, 0x93, 0xA4, 0x12, 0x53,
+        0xFF, 0x87, 0x0E, 0x31, 0x36, 0x21, 0x58, 0x48, 0x01, 0x8E, 0x37, 0x74, 0x32, 0xCA, 0xE9, 0xB1,
+        0xB7, 0xAB, 0x0C, 0xD7, 0xC4, 0x56, 0x42, 0x26, 0x07, 0x98, 0x60, 0xD9, 0xB6, 0xB9, 0x11, 0x40,
+        0xEC, 0x20, 0x8C, 0xBD, 0xA0, 0xC9, 0x84, 0x04, 0x49, 0x23, 0xF1, 0x4F, 0x50, 0x1F, 0x13, 0xDC,
+        0xD8, 0xC0, 0x9E, 0x57, 0xE3, 0xC3, 0x7B, 0x65, 0x3B, 0x02, 0x8F, 0x3E, 0xE8, 0x25, 0x92, 0xE5,
+        0x15, 0xDD, 0xFD, 0x17, 0xA9, 0xBF, 0xD4, 0x9A, 0x7E, 0xC5, 0x39, 0x67, 0xFE, 0x76, 0x9D, 0x43,
+        0xA7, 0xE1, 0xD0, 0xF5, 0x68, 0xF2, 0x1B, 0x34, 0x70, 0x05, 0xA3, 0x8A, 0xD5, 0x79, 0x86, 0xA8,
+        0x30, 0xC6, 0x51, 0x4B, 0x1E, 0xA6, 0x27, 0xF6, 0x35, 0xD2, 0x6E, 0x24, 0x16, 0x82, 0x5F, 0xDA,
+        0xE6, 0x75, 0xA2, 0xEF, 0x2C, 0xB2, 0x1C, 0x9F, 0x5D, 0x6F, 0x80, 0x0A, 0x72, 0x44, 0x9B, 0x6C,
+        0x90, 0x0B, 0x5B, 0x33, 0x7D, 0x5A, 0x52, 0xF3, 0x61, 0xA1, 0xF7, 0xB0, 0xD6, 0x3F, 0x7C, 0x6D,
+        0xED, 0x14, 0xE0, 0xA5, 0x3D, 0x22, 0xB3, 0xF8, 0x89, 0xDE, 0x71, 0x1A, 0xAF, 0xBA, 0xB5, 0x81
+    ]);
 
-    private mEK: any;
-    private mDK: any;
-    private mNumberRounds: any;
-    private mKeyLength: any;
+    // S-box 3
+    sb3: Buffer = Buffer.from([
+        0x52, 0x09, 0x6A, 0xD5, 0x30, 0x36, 0xA5, 0x38, 0xBF, 0x40, 0xA3, 0x9E, 0x81, 0xF3, 0xD7, 0xFB,
+        0x7C, 0xE3, 0x39, 0x82, 0x9B, 0x2F, 0xFF, 0x87, 0x34, 0x8E, 0x43, 0x44, 0xC4, 0xDE, 0xE9, 0xCB,
+        0x54, 0x7B, 0x94, 0x32, 0xA6, 0xC2, 0x23, 0x3D, 0xEE, 0x4C, 0x95, 0x0B, 0x42, 0xFA, 0xC3, 0x4E,
+        0x08, 0x2E, 0xA1, 0x66, 0x28, 0xD9, 0x24, 0xB2, 0x76, 0x5B, 0xA2, 0x49, 0x6D, 0x8B, 0xD1, 0x25,
+        0x72, 0xF8, 0xF6, 0x64, 0x86, 0x68, 0x98, 0x16, 0xD4, 0xA4, 0x5C, 0xCC, 0x5D, 0x65, 0xB6, 0x92,
+        0x6C, 0x70, 0x48, 0x50, 0xFD, 0xED, 0xB9, 0xDA, 0x5E, 0x15, 0x46, 0x57, 0xA7, 0x8D, 0x9D, 0x84,
+        0x90, 0xD8, 0xAB, 0x00, 0x8C, 0xBC, 0xD3, 0x0A, 0xF7, 0xE4, 0x58, 0x05, 0xB8, 0xB3, 0x45, 0x06,
+        0xD0, 0x2C, 0x1E, 0x8F, 0xCA, 0x3F, 0x0F, 0x02, 0xC1, 0xAF, 0xBD, 0x03, 0x01, 0x13, 0x8A, 0x6B,
+        0x3A, 0x91, 0x11, 0x41, 0x4F, 0x67, 0xDC, 0xEA, 0x97, 0xF2, 0xCF, 0xCE, 0xF0, 0xB4, 0xE6, 0x73,
+        0x96, 0xAC, 0x74, 0x22, 0xE7, 0xAD, 0x35, 0x85, 0xE2, 0xF9, 0x37, 0xE8, 0x1C, 0x75, 0xDF, 0x6E,
+        0x47, 0xF1, 0x1A, 0x71, 0x1D, 0x29, 0xC5, 0x89, 0x6F, 0xB7, 0x62, 0x0E, 0xAA, 0x18, 0xBE, 0x1B,
+        0xFC, 0x56, 0x3E, 0x4B, 0xC6, 0xD2, 0x79, 0x20, 0x9A, 0xDB, 0xC0, 0xFE, 0x78, 0xCD, 0x5A, 0xF4,
+        0x1F, 0xDD, 0xA8, 0x33, 0x88, 0x07, 0xC7, 0x31, 0xB1, 0x12, 0x10, 0x59, 0x27, 0x80, 0xEC, 0x5F,
+        0x60, 0x51, 0x7F, 0xA9, 0x19, 0xB5, 0x4A, 0x0D, 0x2D, 0xE5, 0x7A, 0x9F, 0x93, 0xC9, 0x9C, 0xEF,
+        0xA0, 0xE0, 0x3B, 0x4D, 0xAE, 0x2A, 0xF5, 0xB0, 0xC8, 0xEB, 0xBB, 0x3C, 0x83, 0x53, 0x99, 0x61,
+        0x17, 0x2B, 0x04, 0x7E, 0xBA, 0x77, 0xD6, 0x26, 0xE1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0C, 0x7D
+    ]);
+
+    // S-box 4
+    sb4: Buffer = Buffer.from([
+        0x30, 0x68, 0x99, 0x1B, 0x87, 0xB9, 0x21, 0x78, 0x50, 0x39, 0xDB, 0xE1, 0x72, 0x09, 0x62, 0x3C,
+        0x3E, 0x7E, 0x5E, 0x8E, 0xF1, 0xA0, 0xCC, 0xA3, 0x2A, 0x1D, 0xFB, 0xB6, 0xD6, 0x20, 0xC4, 0x8D,
+        0x81, 0x65, 0xF5, 0x89, 0xCB, 0x9D, 0x77, 0xC6, 0x57, 0x43, 0x56, 0x17, 0xD4, 0x40, 0x1A, 0x4D,
+        0xC0, 0x63, 0x6C, 0xE3, 0xB7, 0xC8, 0x64, 0x6A, 0x53, 0xAA, 0x38, 0x98, 0x0C, 0xF4, 0x9B, 0xED,
+        0x7F, 0x22, 0x76, 0xAF, 0xDD, 0x3A, 0x0B, 0x58, 0x67, 0x88, 0x06, 0xC3, 0x35, 0x0D, 0x01, 0x8B,
+        0x8C, 0xC2, 0xE6, 0x5F, 0x02, 0x24, 0x75, 0x93, 0x66, 0x1E, 0xE5, 0xE2, 0x54, 0xD8, 0x10, 0xCE,
+        0x7A, 0xE8, 0x08, 0x2C, 0x12, 0x97, 0x32, 0xAB, 0xB4, 0x27, 0x0A, 0x23, 0xDF, 0xEF, 0xCA, 0xD9,
+        0xB8, 0xFA, 0xDC, 0x31, 0x6B, 0xD1, 0xAD, 0x19, 0x49, 0xBD, 0x51, 0x96, 0xEE, 0xE4, 0xA8, 0x41,
+        0xDA, 0xFF, 0xCD, 0x55, 0x86, 0x36, 0xBE, 0x61, 0x52, 0xF8, 0xBB, 0x0E, 0x82, 0x48, 0x69, 0x9A,
+        0xE0, 0x47, 0x9E, 0x5C, 0x04, 0x4B, 0x34, 0x15, 0x79, 0x26, 0xA7, 0xDE, 0x29, 0xAE, 0x92, 0xD7,
+        0x84, 0xE9, 0xD2, 0xBA, 0x5D, 0xF3, 0xC5, 0xB0, 0xBF, 0xA4, 0x3B, 0x71, 0x44, 0x46, 0x2B, 0xFC,
+        0xEB, 0x6F, 0xD5, 0xF6, 0x14, 0xFE, 0x7C, 0x70, 0x5A, 0x7D, 0xFD, 0x2F, 0x18, 0x83, 0x16, 0xA5,
+        0x91, 0x1F, 0x05, 0x95, 0x74, 0xA9, 0xC1, 0x5B, 0x4A, 0x85, 0x6D, 0x13, 0x07, 0x4F, 0x4E, 0x45,
+        0xB2, 0x0F, 0xC9, 0x1C, 0xA6, 0xBC, 0xEC, 0x73, 0x90, 0x7B, 0xCF, 0x59, 0x8F, 0xA1, 0xF9, 0x2D,
+        0xF2, 0xB1, 0x00, 0x94, 0x37, 0x9F, 0xD0, 0x2E, 0x9C, 0x6E, 0x28, 0x3F, 0x80, 0xF0, 0x3D, 0xD3,
+        0x25, 0x8A, 0xB5, 0xE7, 0x42, 0xB3, 0xC7, 0xEA, 0xF7, 0x4C, 0x11, 0x33, 0x03, 0xA2, 0xAC, 0x60
+    ]);
+
+    // Key scheduling constants
+    c: Uint32Array = new Uint32Array([
+        0x517CC1B7, 0x27220A94, 0xFE13ABE8, 0xFA9A6EE0, 0x6DB14ACC, 0x9E21C820,
+        0xFF28B1D5, 0xEF5DE2B0, 0xDB92371D, 0x2126E970, 0x03249775, 0x04E8C90E
+    ]);
+
+    nr = 0; // Number of rounds
+    ek = new Uint32Array(68); // Encryption round keys - Max size for 256-bit key (17 rounds * 4)
+    dk = new Uint32Array(68) // Decryption round keys
+    key_set = false;
+    iv: Buffer;
+    iv_set = false;
+    previous_block:Buffer;
 
     constructor() {
-    }
-    /**
-     * Key for encryption.
-     *
-     * Only lengths of 16, 24 or 32 bytes allowed!
-     * 
-     * @param {Buffer} key - ```Buffer```
-     */
+    };
+
+    // Utility functions
+    load32BE(data: Buffer, offset: number): number {
+        return (
+            ((data[offset] << 24) |
+                (data[offset + 1] << 16) |
+                (data[offset + 2] << 8) |
+                data[offset + 3]) >>> 0
+        );
+    };
+
+    store32BE(value: number, data: Buffer, offset: number): void {
+        data[offset] = (value >>> 24) & 0xFF;
+        data[offset + 1] = (value >>> 16) & 0xFF;
+        data[offset + 2] = (value >>> 8) & 0xFF;
+        data[offset + 3] = value & 0xFF;
+    };
+
+    mov128(b: Uint32Array, a: Uint32Array): void {
+        b[0] = a[0];
+        b[1] = a[1];
+        b[2] = a[2];
+        b[3] = a[3];
+    };
+
+    xor128(b: Uint32Array, a: Uint32Array): void {
+        b[0] ^= a[0];
+        b[1] ^= a[1];
+        b[2] ^= a[2];
+        b[3] ^= a[3];
+    };
+
+    rol128(b: Uint32Array, a: Uint32Array, n: number): void {
+        const shift = n % 32;
+        const wordShift = Math.floor(n / 32);
+        for (let i = 0; i < 4; i++) {
+            const idx1 = (wordShift + i) % 4;
+            const idx2 = (wordShift + i + 1) % 4;
+            b[i] = ((a[idx1] << shift) | (a[idx2] >>> (32 - shift))) >>> 0;
+        }
+    };
+
+    getByte(x: Uint32Array, n: number): number {
+        return (x[Math.floor(n / 4)] >>> ((3 - (n % 4)) * 8)) & 0xFF;
+    };
+
+    sl1(b: Uint32Array, a: Uint32Array): void {
+        b[0] = (this.sb1[this.getByte(a, 0)] << 24)  | (this.sb2[this.getByte(a, 1)] << 16) |  (this.sb3[this.getByte(a, 2)] << 8)  | this.sb4[this.getByte(a, 3)];
+        b[1] = (this.sb1[this.getByte(a, 4)] << 24)  | (this.sb2[this.getByte(a, 5)] << 16) |  (this.sb3[this.getByte(a, 6)] << 8)  | this.sb4[this.getByte(a, 7)];
+        b[2] = (this.sb1[this.getByte(a, 8)] << 24)  | (this.sb2[this.getByte(a, 9)] << 16) |  (this.sb3[this.getByte(a, 10)] << 8) | this.sb4[this.getByte(a, 11)];
+        b[3] = (this.sb1[this.getByte(a, 12)] << 24) | (this.sb2[this.getByte(a, 13)] << 16) | (this.sb3[this.getByte(a, 14)] << 8) | this.sb4[this.getByte(a, 15)];
+    };
+
+    sl2(b: Uint32Array, a: Uint32Array): void {
+        b[0] = (this.sb3[this.getByte(a, 0)] << 24)  | (this.sb4[this.getByte(a, 1)] << 16)  | (this.sb1[this.getByte(a, 2)] << 8)  | this.sb2[this.getByte(a, 3)];
+        b[1] = (this.sb3[this.getByte(a, 4)] << 24)  | (this.sb4[this.getByte(a, 5)] << 16)  | (this.sb1[this.getByte(a, 6)] << 8)  | this.sb2[this.getByte(a, 7)];
+        b[2] = (this.sb3[this.getByte(a, 8)] << 24)  | (this.sb4[this.getByte(a, 9)] << 16)  | (this.sb1[this.getByte(a, 10)] << 8) | this.sb2[this.getByte(a, 11)];
+        b[3] = (this.sb3[this.getByte(a, 12)] << 24) | (this.sb4[this.getByte(a, 13)] << 16) | (this.sb1[this.getByte(a, 14)] << 8) | this.sb2[this.getByte(a, 15)];
+    };
+
+    a(b: Uint32Array, a: Uint32Array): void {
+        b[0] = (
+            (this.getByte(a, 3) ^ this.getByte(a, 4) ^ this.getByte(a, 6) ^ this.getByte(a, 8)  ^ this.getByte(a, 9) ^  this.getByte(a, 13) ^ this.getByte(a, 14)) << 24 |
+            (this.getByte(a, 2) ^ this.getByte(a, 5) ^ this.getByte(a, 7) ^ this.getByte(a, 8)  ^ this.getByte(a, 9) ^  this.getByte(a, 12) ^ this.getByte(a, 15)) << 16 |
+            (this.getByte(a, 1) ^ this.getByte(a, 4) ^ this.getByte(a, 6) ^ this.getByte(a, 10) ^ this.getByte(a, 11) ^ this.getByte(a, 12) ^ this.getByte(a, 15)) << 8 |
+            (this.getByte(a, 0) ^ this.getByte(a, 5) ^ this.getByte(a, 7) ^ this.getByte(a, 10) ^ this.getByte(a, 11) ^ this.getByte(a, 13) ^ this.getByte(a, 14))
+        ) >>> 0;
+        b[1] = (
+            (this.getByte(a, 0) ^ this.getByte(a, 2) ^ this.getByte(a, 5) ^ this.getByte(a, 8) ^ this.getByte(a, 11) ^ this.getByte(a, 14) ^ this.getByte(a, 15)) << 24 |
+            (this.getByte(a, 1) ^ this.getByte(a, 3) ^ this.getByte(a, 4) ^ this.getByte(a, 9) ^ this.getByte(a, 10) ^ this.getByte(a, 14) ^ this.getByte(a, 15)) << 16 |
+            (this.getByte(a, 0) ^ this.getByte(a, 2) ^ this.getByte(a, 7) ^ this.getByte(a, 9) ^ this.getByte(a, 10) ^ this.getByte(a, 12) ^ this.getByte(a, 13)) << 8 |
+            (this.getByte(a, 1) ^ this.getByte(a, 3) ^ this.getByte(a, 6) ^ this.getByte(a, 8) ^ this.getByte(a, 11) ^ this.getByte(a, 12) ^ this.getByte(a, 13))
+        ) >>> 0;
+        b[2] = (
+            (this.getByte(a, 0) ^ this.getByte(a, 1) ^ this.getByte(a, 4) ^ this.getByte(a, 7) ^ this.getByte(a, 10) ^ this.getByte(a, 13) ^ this.getByte(a, 15)) << 24 |
+            (this.getByte(a, 0) ^ this.getByte(a, 1) ^ this.getByte(a, 5) ^ this.getByte(a, 6) ^ this.getByte(a, 11) ^ this.getByte(a, 12) ^ this.getByte(a, 14)) << 16 |
+            (this.getByte(a, 2) ^ this.getByte(a, 3) ^ this.getByte(a, 5) ^ this.getByte(a, 6) ^ this.getByte(a, 8)  ^ this.getByte(a, 13) ^ this.getByte(a, 15)) << 8 |
+            (this.getByte(a, 2) ^ this.getByte(a, 3) ^ this.getByte(a, 4) ^ this.getByte(a, 7) ^ this.getByte(a, 9)  ^ this.getByte(a, 12) ^ this.getByte(a, 14))
+        ) >>> 0;
+        b[3] = (
+            (this.getByte(a, 1) ^ this.getByte(a, 2) ^ this.getByte(a, 6) ^ this.getByte(a, 7) ^ this.getByte(a, 9) ^ this.getByte(a, 11) ^ this.getByte(a, 12)) << 24 |
+            (this.getByte(a, 0) ^ this.getByte(a, 3) ^ this.getByte(a, 6) ^ this.getByte(a, 7) ^ this.getByte(a, 8) ^ this.getByte(a, 10) ^ this.getByte(a, 13)) << 16 |
+            (this.getByte(a, 0) ^ this.getByte(a, 3) ^ this.getByte(a, 4) ^ this.getByte(a, 5) ^ this.getByte(a, 9) ^ this.getByte(a, 11) ^ this.getByte(a, 14)) << 8 |
+            (this.getByte(a, 1) ^ this.getByte(a, 2) ^ this.getByte(a, 4) ^ this.getByte(a, 5) ^ this.getByte(a, 8) ^ this.getByte(a, 10) ^ this.getByte(a, 15))
+        ) >>> 0;
+    };
+
+    // Odd round function
+    of(d: Uint32Array, rk: Uint32Array): void {
+        const t = new Uint32Array(4);
+        this.xor128(d, rk);
+        this.sl1(t, d);
+        this.a(d, t);
+    };
+
+    // Even round function
+    ef(d: Uint32Array, rk: Uint32Array): void {
+        const t = new Uint32Array(4);
+        this.xor128(d, rk);
+        this.sl2(t, d);
+        this.a(d, t);
+    };
+
+    // Initialize ARIA context
     set_key(key: Buffer): void {
-        if (this.mEK === undefined) {
-            this.mEK = null;
+        const keyLen = key.length;
+
+        let ck1: Uint32Array, ck2: Uint32Array, ck3: Uint32Array;
+
+        if (keyLen === 16) {
+            this.nr = 12;
+            ck1 = this.c.subarray(0, 4);
+            ck2 = this.c.subarray(4, 8);
+            ck3 = this.c.subarray(8, 12);
+        } else if (keyLen === 24) {
+            this.nr = 14;
+            ck1 = this.c.subarray(4, 8);
+            ck2 = this.c.subarray(8, 12);
+            ck3 = this.c.subarray(0, 4);
+        } else if (keyLen === 32) {
+            this.nr = 16;
+            ck1 = this.c.subarray(8, 12);
+            ck2 = this.c.subarray(0, 4);
+            ck3 = this.c.subarray(4, 8);
+        } else {
+            throw new Error("INVALID_KEY_LENGTH");
         }
-        if (this.mDK === undefined) {
-            this.mDK = null;
+
+        const keyWords = keyLen / 4;
+        const w = new Uint32Array(16);
+
+        for (let i = 0; i < 16; i++) {
+            if (i < keyWords) {
+                w[i] = this.load32BE(key, i * 4);
+            } else {
+                w[i] = 0;
+            }
         }
-        if (this.mNumberRounds === undefined) {
-            this.mNumberRounds = 0;
+
+        // Save KR
+        this.mov128(w.subarray(8, 12), w.subarray(4, 8));
+
+        // Compute intermediate values W0, W1, W2, W3
+        this.mov128(w.subarray(4, 8), w.subarray(0, 4));
+        this.of(w.subarray(4, 8), ck1);
+        this.xor128(w.subarray(4, 8), w.subarray(8, 12));
+
+        this.mov128(w.subarray(8, 12), w.subarray(4, 8));
+        this.ef(w.subarray(8, 12), ck2);
+        this.xor128(w.subarray(8, 12), w.subarray(0, 4));
+
+        this.mov128(w.subarray(12, 16), w.subarray(8, 12));
+        this.of(w.subarray(12, 16), ck3);
+        this.xor128(w.subarray(12, 16), w.subarray(4, 8));
+
+        // Compute encryption round keys
+        const ek = this.ek;
+        this.rol128(ek.subarray(0, 4), w.subarray(4, 8), 109);
+        this.xor128(ek.subarray(0, 4), w.subarray(0, 4));
+        this.rol128(ek.subarray(4, 8), w.subarray(8, 12), 109);
+        this.xor128(ek.subarray(4, 8), w.subarray(4, 8));
+        this.rol128(ek.subarray(8, 12), w.subarray(12, 16), 109);
+        this.xor128(ek.subarray(8, 12), w.subarray(8, 12));
+        this.rol128(ek.subarray(12, 16), w.subarray(0, 4), 109);
+        this.xor128(ek.subarray(12, 16), w.subarray(12, 16));
+        this.rol128(ek.subarray(16, 20), w.subarray(4, 8), 97);
+        this.xor128(ek.subarray(16, 20), w.subarray(0, 4));
+        this.rol128(ek.subarray(20, 24), w.subarray(8, 12), 97);
+        this.xor128(ek.subarray(20, 24), w.subarray(4, 8));
+        this.rol128(ek.subarray(24, 28), w.subarray(12, 16), 97);
+        this.xor128(ek.subarray(24, 28), w.subarray(8, 12));
+        this.rol128(ek.subarray(28, 32), w.subarray(0, 4), 97);
+        this.xor128(ek.subarray(28, 32), w.subarray(12, 16));
+        this.rol128(ek.subarray(32, 36), w.subarray(4, 8), 61);
+        this.xor128(ek.subarray(32, 36), w.subarray(0, 4));
+        this.rol128(ek.subarray(36, 40), w.subarray(8, 12), 61);
+        this.xor128(ek.subarray(36, 40), w.subarray(4, 8));
+        this.rol128(ek.subarray(40, 44), w.subarray(12, 16), 61);
+        this.xor128(ek.subarray(40, 44), w.subarray(8, 12));
+        this.rol128(ek.subarray(44, 48), w.subarray(0, 4), 61);
+        this.xor128(ek.subarray(44, 48), w.subarray(12, 16));
+        this.rol128(ek.subarray(48, 52), w.subarray(4, 8), 31);
+        this.xor128(ek.subarray(48, 52), w.subarray(0, 4));
+        this.rol128(ek.subarray(52, 56), w.subarray(8, 12), 31);
+        this.xor128(ek.subarray(52, 56), w.subarray(4, 8));
+        this.rol128(ek.subarray(56, 60), w.subarray(12, 16), 31);
+        this.xor128(ek.subarray(56, 60), w.subarray(8, 12));
+        this.rol128(ek.subarray(60, 64), w.subarray(0, 4), 31);
+        this.xor128(ek.subarray(60, 64), w.subarray(12, 16));
+        this.rol128(ek.subarray(64, 68), w.subarray(4, 8), 19);
+        this.xor128(ek.subarray(64, 68), w.subarray(0, 4));
+
+        // Compute decryption round keys
+        const dk = this.dk;
+        this.mov128(dk.subarray(0, 4), ek.subarray(this.nr * 4, this.nr * 4 + 4));
+
+        for (let i = 1; i < this.nr; i++) {
+            this.a(dk.subarray(i * 4, i * 4 + 4), ek.subarray((this.nr - i) * 4, (this.nr - i) * 4 + 4));
         }
-        if (this.mKeyLength === undefined) {
-            this.mKeyLength = 0;
-        }
-        this.scheduleKey(key);
+
+        this.mov128(dk.subarray(this.nr * 4, this.nr * 4 + 4), ek.subarray(0, 4));
+
         this.key_set = true;
-    }
+    };
 
     /**
      * IV for CBC encryption.
      *
      * Must be same length as key!
      * 
-     * @param {Buffer} iv - ```Buffer``` 
+     * @param {Buffer} iv - ```Buffer```
      */
     set_iv(iv: Buffer): void {
         if (this.key_set != true) {
-            throw Error("Must set key before IV");
+            throw new Error("Must set key before IV");
         }
         if (iv) {
-            //if (iv.length != this.mKeyLength) {
-            //    throw Error(`Enter a vaild ${this.mKeyLength} byte IV for CBC mode`);
-            //} else {
+            if (iv.length != 16) {
+                throw new Error(`Enter a vaild 16 byte IV for CBC mode`);
+            } else {
                 this.iv = iv;
                 this.iv_set = true;
-            //}
-        } else {
-            throw Error(`Enter a vaild ${this.mKeyLength} byte IV for CBC mode`);
-        }
-    };
-
-    C1_$LI$():Buffer {
-        if (this.C1 == null) {
-            this.C1 = Buffer.from(
-                [81, 124, 193, 183, 39, 34, 10, 148, 254, 19, 171, 232, 250, 154, 110, 224]
-            );
-        }
-        return this.C1;
-    };
-    C2_$LI$():Buffer {
-        if (this.C2 == null) {
-            this.C2 = Buffer.from(
-                [109, 177, 74, 204, 158, 33, 200, 32, 255, 40, 177, 213, 239, 93, 226, 176]
-            );
-        }
-        return this.C2;
-    };
-    C3_$LI$() {
-        if (this.C3 == null) {
-            this.C3 =  Buffer.from(
-                [219, 146, 55, 29, 33, 38, 233, 112, 3, 36, 151, 117, 4, 232, 201, 14]
-            );
-        }
-        return this.C3;
-    };
-    SB1_$LI$():Buffer {
-        if (this.SB1 == null) {
-            this.SB1 = Buffer.from(
-                [99, 124, 119, 123, 242, 107, 111, 197, 48, 1, 103, 43, 254, 215, 171, 118,
-                    202, 130, 201, 125, 250, 89, 71, 240, 173, 212, 162, 175, 156, 164, 114, 192,
-                    183, 253, 147, 38, 54, 63, 247, 204, 52, 165, 229, 241, 113, 216, 49, 21,
-                    4, 199, 35, 195, 24, 150, 5, 154, 7, 18, 128, 226, 235, 39, 178, 117,
-                    9, 131, 44, 26, 27, 110, 90, 160, 82, 59, 214, 179, 41, 227, 47, 132,
-                    83, 209, 0, 237, 32, 252, 177, 91, 106, 203, 190, 57, 74, 76, 88, 207,
-                    208, 239, 170, 251, 67, 77, 51, 133, 69, 249, 2, 127, 80, 60, 159, 168,
-                    81, 163, 64, 143, 146, 157, 56, 245, 188, 182, 218, 33, 16, 255, 243, 210,
-                    205, 12, 19, 236, 95, 151, 68, 23, 196, 167, 126, 61, 100, 93, 25, 115,
-                    96, 129, 79, 220, 34, 42, 144, 136, 70, 238, 184, 20, 222, 94, 11, 219,
-                    224, 50, 58, 10, 73, 6, 36, 92, 194, 211, 172, 98, 145, 149, 228, 121,
-                    231, 200, 55, 109, 141, 213, 78, 169, 108, 86, 244, 234, 101, 122, 174, 8,
-                    186, 120, 37, 46, 28, 166, 180, 198, 232, 221, 116, 31, 75, 189, 139, 138,
-                    112, 62, 181, 102, 72, 3, 246, 14, 97, 53, 87, 185, 134, 193, 29, 158,
-                    225, 248, 152, 17, 105, 217, 142, 148, 155, 30, 135, 233, 206, 85, 40, 223,
-                    140, 161, 137, 13, 191, 230, 66, 104, 65, 153, 45, 15, 176, 84, 187, 22]
-            );
-        } return this.SB1;
-    };
-    SB2_$LI$() {
-        if (this.SB2 == null) {
-            this.SB2 = Buffer.from(
-                [226, 78, 84, 252, 148, 194, 74, 204, 98, 13, 106, 70, 60, 77, 139, 209,
-                    94, 250, 100, 203, 180, 151, 190, 43, 188, 119, 46, 3, 211, 25, 89, 193,
-                    29, 6, 65, 107, 85, 240, 153, 105, 234, 156, 24, 174, 99, 223, 231, 187,
-                    0, 115, 102, 251, 150, 76, 133, 228, 58, 9, 69, 170, 15, 238, 16, 235,
-                    45, 127, 244, 41, 172, 207, 173, 145, 141, 120, 200, 149, 249, 47, 206, 205,
-                    8, 122, 136, 56, 92, 131, 42, 40, 71, 219, 184, 199, 147, 164, 18, 83,
-                    255, 135, 14, 49, 54, 33, 88, 72, 1, 142, 55, 116, 50, 202, 233, 177,
-                    183, 171, 12, 215, 196, 86, 66, 38, 7, 152, 96, 217, 182, 185, 17, 64,
-                    236, 32, 140, 189, 160, 201, 132, 4, 73, 35, 241, 79, 80, 31, 19, 220,
-                    216, 192, 158, 87, 227, 195, 123, 101, 59, 2, 143, 62, 232, 37, 146, 229,
-                    21, 221, 253, 23, 169, 191, 212, 154, 126, 197, 57, 103, 254, 118, 157, 67,
-                    167, 225, 208, 245, 104, 242, 27, 52, 112, 5, 163, 138, 213, 121, 134, 168,
-                    48, 198, 81, 75, 30, 166, 39, 246, 53, 210, 110, 36, 22, 130, 95, 218,
-                    230, 117, 162, 239, 44, 178, 28, 159, 93, 111, 128, 10, 114, 68, 155, 108,
-                    144, 11, 91, 51, 125, 90, 82, 243, 97, 161, 247, 176, 214, 63, 124, 109,
-                    237, 20, 224, 165, 61, 34, 179, 248, 137, 222, 113, 26, 175, 186, 181, 129]
-            );
-        } return this.SB2;
-    };
-    SB3_$LI$() {
-        if (this.SB3 == null) {
-            this.SB3 = Buffer.from(
-                [82, 9, 106, 213, 48, 54, 165, 56, 191, 64, 163, 158, 129, 243, 215, 251,
-                    124, 227, 57, 130, 155, 47, 255, 135, 52, 142, 67, 68, 196, 222, 233, 203,
-                    84, 123, 148, 50, 166, 194, 35, 61, 238, 76, 149, 11, 66, 250, 195, 78,
-                    8, 46, 161, 102, 40, 217, 36, 178, 118, 91, 162, 73, 109, 139, 209, 37,
-                    114, 248, 246, 100, 134, 104, 152, 22, 212, 164, 92, 204, 93, 101, 182, 146,
-                    108, 112, 72, 80, 253, 237, 185, 218, 94, 21, 70, 87, 167, 141, 157, 132,
-                    144, 216, 171, 0, 140, 188, 211, 10, 247, 228, 88, 5, 184, 179, 69, 6,
-                    208, 44, 30, 143, 202, 63, 15, 2, 193, 175, 189, 3, 1, 19, 138, 107,
-                    58, 145, 17, 65, 79, 103, 220, 234, 151, 242, 207, 206, 240, 180, 230, 115,
-                    150, 172, 116, 34, 231, 173, 53, 133, 226, 249, 55, 232, 28, 117, 223, 110,
-                    71, 241, 26, 113, 29, 41, 197, 137, 111, 183, 98, 14, 170, 24, 190, 27,
-                    252, 86, 62, 75, 198, 210, 121, 32, 154, 219, 192, 254, 120, 205, 90, 244,
-                    31, 221, 168, 51, 136, 7, 199, 49, 177, 18, 16, 89, 39, 128, 236, 95,
-                    96, 81, 127, 169, 25, 181, 74, 13, 45, 229, 122, 159, 147, 201, 156, 239,
-                    160, 224, 59, 77, 174, 42, 245, 176, 200, 235, 187, 60, 131, 83, 153, 97,
-                    23, 43, 4, 126, 186, 119, 214, 38, 225, 105, 20, 99, 85, 33, 12, 125]
-            );
-        } return this.SB3;
-    };
-    SB4_$LI$() {
-        if (this.SB4 == null) {
-            this.SB4 = Buffer.from(
-                [48, 104, 153, 27, 135, 185, 33, 120, 80, 57, 219, 225, 114, 9, 98, 60,
-                    62, 126, 94, 142, 241, 160, 204, 163, 42, 29, 251, 182, 214, 32, 196, 141,
-                    129, 101, 245, 137, 203, 157, 119, 198, 87, 67, 86, 23, 212, 64, 26, 77,
-                    192, 99, 108, 227, 183, 200, 100, 106, 83, 170, 56, 152, 12, 244, 155, 237,
-                    127, 34, 118, 175, 221, 58, 11, 88, 103, 136, 6, 195, 53, 13, 1, 139,
-                    140, 194, 230, 95, 2, 36, 117, 147, 102, 30, 229, 226, 84, 216, 16, 206,
-                    122, 232, 8, 44, 18, 151, 50, 171, 180, 39, 10, 35, 223, 239, 202, 217,
-                    184, 250, 220, 49, 107, 209, 173, 25, 73, 189, 81, 150, 238, 228, 168, 65,
-                    218, 255, 205, 85, 134, 54, 190, 97, 82, 248, 187, 14, 130, 72, 105, 154,
-                    224, 71, 158, 92, 4, 75, 52, 21, 121, 38, 167, 222, 41, 174, 146, 215,
-                    132, 233, 210, 186, 93, 243, 197, 176, 191, 164, 59, 113, 68, 70, 43, 252,
-                    235, 111, 213, 246, 20, 254, 124, 112, 90, 125, 253, 47, 24, 131, 22, 165,
-                    145, 31, 5, 149, 116, 169, 193, 91, 74, 133, 109, 19, 7, 79, 78, 69,
-                    178, 15, 201, 28, 166, 188, 236, 115, 144, 123, 207, 89, 143, 161, 249, 45,
-                    242, 177, 0, 148, 55, 159, 208, 46, 156, 110, 40, 63, 128, 240, 61, 211,
-                    37, 138, 181, 231, 66, 179, 199, 234, 247, 76, 17, 51, 3, 162, 172, 96]
-            );
-        } return this.SB4;
-    };
-
-    XOR(x: Buffer, y: Buffer): Buffer {
-        var length = x.length;
-        var result = Buffer.alloc(length);
-        result.set(x);
-        var i = 0;
-        while ((i < length && i < y.length)) {
-            {
-                result[i] ^= y[i];
-                i++;
             }
-        }
-        ;
-        return result;
-    };
-
-    ROL(array: Buffer, nShift: number): Buffer {
-        var nBytes = array.length;
-        var result =  Buffer.alloc(nBytes);
-        nShift = nShift % (nBytes * 8);
-        if (nShift === 0) {
-            result.set(array);
-        }
-        else {
-            var byteOffset = (nShift / 8 | 0);
-            var leftShift = nShift % 8;
-            var rightShift = 8 - leftShift;
-            for (var i = 0; i < nBytes; i++) {
-                {
-                    var leftPart = ((array[(i + byteOffset) % nBytes] << leftShift) | 0);
-                    var rightPart = ((this.unsigned(array[(i + byteOffset + 1) % nBytes]) >> rightShift) | 0);
-                    result[i] = ((leftPart | rightPart) | 0);
-                }
-                ;
-            }
-        }
-        return result;
-    };
-
-    ROR(array: Buffer, nShift: number): Buffer {
-        return this.ROL(array, (array.length * 8) - nShift);
-    };
-
-    unsigned(b: number): number {
-        return b & 255;
-    };
-
-    private SL1(array: Buffer): Buffer {
-        var result =  Buffer.alloc(16);
-        result[0] = this.SB1_$LI$()[this.unsigned(array[0])];
-        result[1] = this.SB2_$LI$()[this.unsigned(array[1])];
-        result[2] = this.SB3_$LI$()[this.unsigned(array[2])];
-        result[3] = this.SB4_$LI$()[this.unsigned(array[3])];
-        result[4] = this.SB1_$LI$()[this.unsigned(array[4])];
-        result[5] = this.SB2_$LI$()[this.unsigned(array[5])];
-        result[6] = this.SB3_$LI$()[this.unsigned(array[6])];
-        result[7] = this.SB4_$LI$()[this.unsigned(array[7])];
-        result[8] = this.SB1_$LI$()[this.unsigned(array[8])];
-        result[9] = this.SB2_$LI$()[this.unsigned(array[9])];
-        result[10] = this.SB3_$LI$()[this.unsigned(array[10])];
-        result[11] = this.SB4_$LI$()[this.unsigned(array[11])];
-        result[12] = this.SB1_$LI$()[this.unsigned(array[12])];
-        result[13] = this.SB2_$LI$()[this.unsigned(array[13])];
-        result[14] = this.SB3_$LI$()[this.unsigned(array[14])];
-        result[15] = this.SB4_$LI$()[this.unsigned(array[15])];
-        return result;
-    };
-
-    private SL2(array: Buffer): Buffer {
-        var result = Buffer.alloc(16);
-        result[0] = this.SB3_$LI$()[this.unsigned(array[0])];
-        result[1] = this.SB4_$LI$()[this.unsigned(array[1])];
-        result[2] = this.SB1_$LI$()[this.unsigned(array[2])];
-        result[3] = this.SB2_$LI$()[this.unsigned(array[3])];
-        result[4] = this.SB3_$LI$()[this.unsigned(array[4])];
-        result[5] = this.SB4_$LI$()[this.unsigned(array[5])];
-        result[6] = this.SB1_$LI$()[this.unsigned(array[6])];
-        result[7] = this.SB2_$LI$()[this.unsigned(array[7])];
-        result[8] = this.SB3_$LI$()[this.unsigned(array[8])];
-        result[9] = this.SB4_$LI$()[this.unsigned(array[9])];
-        result[10] = this.SB1_$LI$()[this.unsigned(array[10])];
-        result[11] = this.SB2_$LI$()[this.unsigned(array[11])];
-        result[12] = this.SB3_$LI$()[this.unsigned(array[12])];
-        result[13] = this.SB4_$LI$()[this.unsigned(array[13])];
-        result[14] = this.SB1_$LI$()[this.unsigned(array[14])];
-        result[15] = this.SB2_$LI$()[this.unsigned(array[15])];
-        return result;
-    };
-
-    private FO(D: Buffer, RK: Buffer): Buffer {
-        return this.A(this.SL1(this.XOR(D, RK)));
-    };
-
-
-    private FE(D: Buffer, RK: Buffer): Buffer {
-        return this.A(this.SL2(this.XOR(D, RK)));
-    };
-
-    private A(b: Buffer): Buffer {
-        var length = b.length;
-        if (length !== 16) {
-            throw new Error("Illegal input size. Diffusion layer should take 16-byte string as parameter.");
-        }
-        else {
-            var result = Buffer.alloc(16);
-            result[0] = ((b[3] ^ b[4] ^ b[6] ^ b[8] ^ b[9] ^ b[13] ^ b[14]) | 0);
-            result[1] = ((b[2] ^ b[5] ^ b[7] ^ b[8] ^ b[9] ^ b[12] ^ b[15]) | 0);
-            result[2] = ((b[1] ^ b[4] ^ b[6] ^ b[10] ^ b[11] ^ b[12] ^ b[15]) | 0);
-            result[3] = ((b[0] ^ b[5] ^ b[7] ^ b[10] ^ b[11] ^ b[13] ^ b[14]) | 0);
-            result[4] = ((b[0] ^ b[2] ^ b[5] ^ b[8] ^ b[11] ^ b[14] ^ b[15]) | 0);
-            result[5] = ((b[1] ^ b[3] ^ b[4] ^ b[9] ^ b[10] ^ b[14] ^ b[15]) | 0);
-            result[6] = ((b[0] ^ b[2] ^ b[7] ^ b[9] ^ b[10] ^ b[12] ^ b[13]) | 0);
-            result[7] = ((b[1] ^ b[3] ^ b[6] ^ b[8] ^ b[11] ^ b[12] ^ b[13]) | 0);
-            result[8] = ((b[0] ^ b[1] ^ b[4] ^ b[7] ^ b[10] ^ b[13] ^ b[15]) | 0);
-            result[9] = ((b[0] ^ b[1] ^ b[5] ^ b[6] ^ b[11] ^ b[12] ^ b[14]) | 0);
-            result[10] = ((b[2] ^ b[3] ^ b[5] ^ b[6] ^ b[8] ^ b[13] ^ b[15]) | 0);
-            result[11] = ((b[2] ^ b[3] ^ b[4] ^ b[7] ^ b[9] ^ b[12] ^ b[14]) | 0);
-            result[12] = ((b[1] ^ b[2] ^ b[6] ^ b[7] ^ b[9] ^ b[11] ^ b[12]) | 0);
-            result[13] = ((b[0] ^ b[3] ^ b[6] ^ b[7] ^ b[8] ^ b[10] ^ b[13]) | 0);
-            result[14] = ((b[0] ^ b[3] ^ b[4] ^ b[5] ^ b[9] ^ b[11] ^ b[14]) | 0);
-            result[15] = ((b[1] ^ b[2] ^ b[4] ^ b[5] ^ b[8] ^ b[10] ^ b[15]) | 0);
-            return result;
-        }
-    };
-
-    private scheduleKey(key: Buffer) {
-        this.mKeyLength = 16;
-        var CK1: Buffer;
-        var CK2: Buffer;
-        var CK3: Buffer;
-        if (this.mKeyLength === 16) {
-            CK1 = this.C1_$LI$();
-            CK2 = this.C2_$LI$();
-            CK3 = this.C3_$LI$();
-            this.mNumberRounds = 12;
-        } else if (this.mKeyLength === 24) {
-            CK1 = this.C2_$LI$();
-            CK2 = this.C3_$LI$();
-            CK3 = this.C1_$LI$();
-            this.mNumberRounds = 14;
-        } else if (this.mKeyLength === 32) {
-            CK1 = this.C3_$LI$();
-            CK2 = this.C1_$LI$();
-            CK3 = this.C2_$LI$();
-            this.mNumberRounds = 16;
         } else {
-            throw new Error("Illegal key length. Only 128, 192 and 256 bit keys are valid.");
+            throw new Error(`Enter a vaild 16 byte IV for CBC mode`);
         }
-        var W0 = key.subarray(0, 16);
-        var KR = (this.mKeyLength > 16) ? extendBuffer(key.subarray(16, key.length), 16, 0) : Buffer.alloc(16);
-        var W1 = this.XOR(this.FO(W0, CK1), KR);
-        var W2 = this.XOR(this.FE(W1, CK2), W0);
-        var W3 = this.XOR(this.FO(W2, CK3), W1);
-        this.mEK = new Array(17);
-        this.mEK[0] = this.XOR(W0, this.ROR(W1, 19));
-        this.mEK[1] = this.XOR(W1, this.ROR(W2, 19));
-        this.mEK[2] = this.XOR(W2, this.ROR(W3, 19));
-        this.mEK[3] = this.XOR(this.ROR(W0, 19), W3);
-        this.mEK[4] = this.XOR(W0, this.ROR(W1, 31));
-        this.mEK[5] = this.XOR(W1, this.ROR(W2, 31));
-        this.mEK[6] = this.XOR(W2, this.ROR(W3, 31));
-        this.mEK[7] = this.XOR(this.ROR(W0, 31), W3);
-        this.mEK[8] = this.XOR(W0, this.ROL(W1, 61));
-        this.mEK[9] = this.XOR(W1, this.ROL(W2, 61));
-        this.mEK[10] = this.XOR(W2, this.ROL(W3, 61));
-        this.mEK[11] = this.XOR(this.ROL(W0, 61), W3);
-        this.mEK[12] = this.XOR(W0, this.ROL(W1, 31));
-        this.mEK[13] = this.XOR(W1, this.ROL(W2, 31));
-        this.mEK[14] = this.XOR(W2, this.ROL(W3, 31));
-        this.mEK[15] = this.XOR(this.ROL(W0, 31), W3);
-        this.mEK[16] = this.XOR(W0, this.ROL(W1, 19));
-        this.mDK = new Array(this.mNumberRounds + 1);
-        this.mDK[0] = this.mEK[this.mNumberRounds];
-        for (var i = 1; i < this.mNumberRounds; i++) {
-            this.mDK[i] = this.A(this.mEK[this.mNumberRounds - i]);
-        }
-        this.mDK[this.mNumberRounds] = this.mEK[0];
     };
 
-    encrypt_block(start_chunk: Buffer, last_block?: boolean): Buffer {
+    // Encrypt a 16-byte block
+    encrypt_block(input: Buffer, last_block?: boolean): Buffer {
+        const p = new Uint32Array(4);
+        const q = new Uint32Array(4);
+        const output = Buffer.alloc(16);
+        const ek = this.ek;
 
-        let text = start_chunk;
         if(last_block){
-            text = this.padd_block(start_chunk);
+            input = padd_block(input);
         }
         if (this.iv_set == true) {
-            text = xor(text, this.iv);
+            input = xor(input, this.iv);
         }
 
-        var keys = this.mEK;
-        var length = text.length;
-        var result = Buffer.alloc(length);
-        var block = Buffer.alloc(this.mKeyLength);
-        var nBlocks = (length / this.mKeyLength | 0);
-        for (var i = 0; i < nBlocks; i++) {
-            {
-                var currentPos = i * this.mKeyLength;
-                    /* arraycopy */ (function (srcPts, srcOff, dstPts, dstOff, size) {
-                    if (srcPts !== dstPts || dstOff >= srcOff + size) {
-                        while (--size >= 0)
-                            dstPts[dstOff++] = srcPts[srcOff++];
-                    }
-                    else {
-                        var tmp = srcPts.subarray(srcOff, srcOff + size);
-                        for (var i_1 = 0; i_1 < size; i_1++)
-                            dstPts[dstOff++] = tmp[i_1];
-                    }
-                })(text, currentPos, block, 0, this.mKeyLength);
-                block = this.FO(block, keys[0]);
-                for (var j = 1; j < this.mNumberRounds - 1; j++) {
-                    block = (j % 2) === 0 ? this.FO(block, keys[j]) : this.FE(block, keys[j]);
-                }
-                block = this.XOR(this.SL2(this.XOR(block, keys[this.mNumberRounds - 1])), keys[this.mNumberRounds]);
-                    /* arraycopy */ (function (srcPts, srcOff, dstPts, dstOff, size) {
-                    if (srcPts !== dstPts || dstOff >= srcOff + size) {
-                        while (--size >= 0)
-                            dstPts[dstOff++] = srcPts[srcOff++];
-                    }
-                    else {
-                        var tmp = srcPts.subarray(srcOff, srcOff + size);
-                        for (var i_2 = 0; i_2 < size; i_2++)
-                            dstPts[dstOff++] = tmp[i_2];
-                    }
-                })(block, 0, result, currentPos, this.mKeyLength);
-            }
-            ;
+        p[0] = this.load32BE(input, 0);
+        p[1] = this.load32BE(input, 4);
+        p[2] = this.load32BE(input, 8);
+        p[3] = this.load32BE(input, 12);
+
+        this.of(p, ek.subarray(0, 4));
+        this.ef(p, ek.subarray(4, 8));
+        this.of(p, ek.subarray(8, 12));
+        this.ef(p, ek.subarray(12, 16));
+        this.of(p, ek.subarray(16, 20));
+        this.ef(p, ek.subarray(20, 24));
+        this.of(p, ek.subarray(24, 28));
+        this.ef(p, ek.subarray(28, 32));
+        this.of(p, ek.subarray(32, 36));
+        this.ef(p, ek.subarray(36, 40));
+        this.of(p, ek.subarray(40, 44));
+
+        if (this.nr === 12) {
+            this.xor128(p, ek.subarray(44, 48));
+            this.sl2(q, p);
+            this.xor128(q, ek.subarray(48, 52));
+        } else if (this.nr === 14) {
+            this.ef(p, ek.subarray(44, 48));
+            this.of(p, ek.subarray(48, 52));
+            this.xor128(p, ek.subarray(52, 56));
+            this.sl2(q, p);
+            this.xor128(q, ek.subarray(56, 60));
+        } else {
+            this.ef(p, ek.subarray(44, 48));
+            this.of(p, ek.subarray(48, 52));
+            this.ef(p, ek.subarray(52, 56));
+            this.of(p, ek.subarray(56, 60));
+            this.xor128(p, ek.subarray(60, 64));
+            this.sl2(q, p);
+            this.xor128(q, ek.subarray(64, 68));
         }
+
+        this.store32BE(q[0], output, 0);
+        this.store32BE(q[1], output, 4);
+        this.store32BE(q[2], output, 8);
+        this.store32BE(q[3], output, 12);
+
         if (this.iv_set == true) {
-            this.iv = result;
+            this.iv = output;
         }
-        return result;
+
+        return output;
     };
 
-    decrypt_block(start_chunk: Buffer, last_block?: boolean ): Buffer {
-        var text = start_chunk;
+    // Decrypt a 16-byte block
+    decrypt_block(input: Buffer, last_block?: boolean): Buffer {
+        const p = new Uint32Array(4);
+        const q = new Uint32Array(4);
+        const output = Buffer.alloc(16);
+        const dk = this.dk;
+
         if (this.iv_set == true) {
             if (this.previous_block != undefined) {
                 this.iv = this.previous_block;
             }
         }
-        this.previous_block = text;
+        this.previous_block = input;
 
-        var keys = this.mDK;
-        var length = text.length;
-        var result = Buffer.alloc(length);
-        var block = Buffer.alloc(this.mKeyLength);
-        var nBlocks = (length / this.mKeyLength | 0);
-        for (var i = 0; i < nBlocks; i++) {
-            {
-                var currentPos = i * this.mKeyLength;
-                    /* arraycopy */ (function (srcPts, srcOff, dstPts, dstOff, size) {
-                    if (srcPts !== dstPts || dstOff >= srcOff + size) {
-                        while (--size >= 0)
-                            dstPts[dstOff++] = srcPts[srcOff++];
-                    }
-                    else {
-                        var tmp = srcPts.subarray(srcOff, srcOff + size);
-                        for (var i_1 = 0; i_1 < size; i_1++)
-                            dstPts[dstOff++] = tmp[i_1];
-                    }
-                })(text, currentPos, block, 0, this.mKeyLength);
-                block = this.FO(block, keys[0]);
-                for (var j = 1; j < this.mNumberRounds - 1; j++) {
-                    block = (j % 2) === 0 ? this.FO(block, keys[j]) : this.FE(block, keys[j]);
-                }
-                block = this.XOR(this.SL2(this.XOR(block, keys[this.mNumberRounds - 1])), keys[this.mNumberRounds]);
-                    /* arraycopy */ (function (srcPts, srcOff, dstPts, dstOff, size) {
-                    if (srcPts !== dstPts || dstOff >= srcOff + size) {
-                        while (--size >= 0)
-                            dstPts[dstOff++] = srcPts[srcOff++];
-                    }
-                    else {
-                        var tmp = srcPts.subarray(srcOff, srcOff + size);
-                        for (var i_2 = 0; i_2 < size; i_2++)
-                            dstPts[dstOff++] = tmp[i_2];
-                    }
-                })(block, 0, result, currentPos, this.mKeyLength);
-            }
-            ;
+        p[0] = this.load32BE(input, 0);
+        p[1] = this.load32BE(input, 4);
+        p[2] = this.load32BE(input, 8);
+        p[3] = this.load32BE(input, 12);
+
+        this.of(p, dk.subarray(0, 4));
+        this.ef(p, dk.subarray(4, 8));
+        this.of(p, dk.subarray(8, 12));
+        this.ef(p, dk.subarray(12, 16));
+        this.of(p, dk.subarray(16, 20));
+        this.ef(p, dk.subarray(20, 24));
+        this.of(p, dk.subarray(24, 28));
+        this.ef(p, dk.subarray(28, 32));
+        this.of(p, dk.subarray(32, 36));
+        this.ef(p, dk.subarray(36, 40));
+        this.of(p, dk.subarray(40, 44));
+
+        if (this.nr === 12) {
+            this.xor128(p, dk.subarray(44, 48));
+            this.sl2(q, p);
+            this.xor128(q, dk.subarray(48, 52));
+        } else if (this.nr === 14) {
+            this.ef(p, dk.subarray(44, 48));
+            this.of(p, dk.subarray(48, 52));
+            this.xor128(p, dk.subarray(52, 56));
+            this.sl2(q, p);
+            this.xor128(q, dk.subarray(56, 60));
+        } else {
+            this.ef(p, dk.subarray(44, 48));
+            this.of(p, dk.subarray(48, 52));
+            this.ef(p, dk.subarray(52, 56));
+            this.of(p, dk.subarray(56, 60));
+            this.xor128(p, dk.subarray(60, 64));
+            this.sl2(q, p);
+            this.xor128(q, dk.subarray(64, 68));
         }
-        var return_buffer = result;
+
+        this.store32BE(q[0], output, 0);
+        this.store32BE(q[1], output, 4);
+        this.store32BE(q[2], output, 8);
+        this.store32BE(q[3], output, 12);
+
         if (this.iv_set == true) {
-            return_buffer = this.XOR(result, this.iv);
+            xor(output, this.iv);
         }
-        if(last_block){
-            var padd_value = align(return_buffer.length, 16);
-            return removePKCSPadding(return_buffer, padd_value, true);
-        }
-        return return_buffer;
-    };
 
-    private padd_block(data:Buffer){
-        const block_size = 16;
-        if (data.length % block_size != 0) {
-            var padd_value = block_size - (data.length % block_size);
-            var paddbuffer = Buffer.alloc(padd_value, padd_value & 0xFF);
-            data = Buffer.concat([data, paddbuffer]);
+        if(last_block){
+            var padd_value = align(output.length, 16);
+            return removePKCSPadding(output, padd_value, true);
         }
-        return data;
+
+        return output;
     };
 
     /**
@@ -1178,7 +1154,7 @@ class ARIA {
      * @returns ```Buffer```
      */
     encrypt(data_in: Buffer, padding: number = 0): Buffer {
-        const block_size = this.mKeyLength;
+        const block_size = this.ARIA_BLOCK_SIZE;
         if (this.key_set != true) {
             throw Error("Please set key first");
         }
@@ -1212,12 +1188,12 @@ class ARIA {
      * 
      * If remove_padding is ``true``, will remove PKCS padding on last block.
      *
-     * @param {Buffer} data_in - ```Buffer``
+     * @param {Buffer} data_in - ```Buffer```
      * @param {boolean|number} remove_padding - Will check the last block and remove padded ``number``. Will remove PKCS if ``true``
      * @returns ```Buffer```
      */
     decrypt(data_in: Buffer, remove_padding: boolean | number = true): Buffer {
-        const block_size = this.mKeyLength;
+        const block_size = 16;
         if (this.key_set != true) {
             throw Error("Please set key first");
         }
@@ -1783,7 +1759,7 @@ class CAMELLIA {
             this.setkey(true, this.key);
         }
         if(last_block){
-            block = this.padd_block(block) as Buffer;
+            block = padd_block(block) as Buffer;
         }
         if (this.iv_set == true) {
             block = xor(block, this.iv) as Buffer;
@@ -1814,16 +1790,6 @@ class CAMELLIA {
             return removePKCSPadding(return_block, padd_value, true);
         }
         return return_block;
-    };
-
-    private padd_block(data:Buffer){
-        const block_size = 16;
-        if (data.length % block_size != 0) {
-            var padd_value = block_size - (data.length % block_size);
-            var paddbuffer = Buffer.alloc(padd_value, padd_value & 0xFF);
-            data = Buffer.concat([data, paddbuffer]);
-        }
-        return data;
     };
 
     /**

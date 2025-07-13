@@ -1,6 +1,6 @@
 import fs from "fs";
 import { Crypt, CRC32 } from './hash.js';
-import { BiReader, BiReaderStream, BiWriterStream } from 'bireader';
+import { BiReader, BiReaderStream, BiWriterStream, hexdump } from 'bireader';
 import { JPExtensionCodec, JPExtensionCodecType } from "./ext.js";
 import {
     VERSION_NUMBER,
@@ -1617,7 +1617,6 @@ export class JPDecode<ContextType = undefined> extends JPBase {
     private decrypt(br?: BiWriterStream, buffer?:Buffer, finalSize?: number) {
         const cypter = new Crypt(this.encryptionKey);
 
-
         if (!this.useStream) {
             if(buffer == null){
                 this.throwError(" Buffer to decrypt not set. " + this.fileName);
@@ -1626,7 +1625,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             const decrypted = cypter.decrypt(buffer);
 
             if(decrypted.length != finalSize){
-                this.addError(` Decrypted buffer size of ${decrypted.length} wasn't expected size of ${finalSize}  in file ` + this.fileName);
+                this.addError(` Decrypted buffer size of ${decrypted.length} wasn expected size of ${finalSize} in file ` + this.fileName);
             }
 
             return decrypted;
@@ -1678,7 +1677,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             br.trim();
 
             if(br.size != finalSize){
-                this.addError(` Decrypted buffer size of ${br.size} wasn't expected size of ${finalSize} in file 1 + this.fileName`);
+                this.addError(` Decrypted buffer size of ${br.size} was expected size of ${finalSize} in file ` + this.fileName);
             }
 
             return Buffer.alloc(0);

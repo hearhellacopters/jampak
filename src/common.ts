@@ -8,7 +8,7 @@ import {
     BiWriterAsync
 } from 'bireader';
 import { JPExtensionCodecType } from "./ext.js";
-import pack from '../package.json' with { type: "json" };
+import pack from '../package.json';
 
 export const GROWTHINCREMENT_DEFAULT = 0x1000000;
 

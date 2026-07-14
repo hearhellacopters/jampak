@@ -3,7 +3,7 @@
 //
 //      File: JAMPAK.bt
 //   Authors: HearHellacopters
-//   Version: 1.0.2
+//   Version: 1.0.5
 //   Purpose: Storing JavaScript data in binary
 //  Category: Archive
 // File Mask: *.jpk
@@ -141,7 +141,7 @@ enum <ubyte> JPExtType
 typedef struct (uint64 &toRead)
 {
     local int i <hidden=true> = 0;
-    JPType type<bgcolor=cBlack>;
+    JPType type<bgcolor=(this == 0xc4 ? cRed : cBlack)>;
     toRead--;
     local string valueStr = "";
     local string nameStr = "";
@@ -410,7 +410,7 @@ typedef struct (uint64 &toRead)
 typedef struct (uint64 &toRead)
 {
     local int i <hidden=true> = 0;
-    JPType type<bgcolor=cBlack>;
+    JPType type<bgcolor=(this == 0xc4 ? cRed : cBlack)>;
     toRead--;
     if (type < ARRAY_0)
     { 

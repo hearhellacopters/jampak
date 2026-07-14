@@ -1,6 +1,7 @@
-import { BiWriter, hexdump } from 'bireader';
+import fsp from "fs/promises";
+import { BiReaderAsync, BiWriterAsync, hexdump } from 'bireader';
 import { 
-    Crypt,
+    Crypt, 
     CRC32 
 } from './hash.js';
 import { 
@@ -11,24 +12,24 @@ import {
 import {
     VERSION_MAJOR,
     VERSION_MINOR,
-    deflateFileSync,
-    deflateBuffer,
+    deflateBufferAsync,
     isFloat32Safe,
+    fileExists,
     endian,
     ubyte,
     uint16,
     JPType,
     JPExtType,
     stringList,
-    JPBase,
+    JPBaseAsync,
     EncoderOptions,
-    GROWTHINCREMENT_DEFAULT
+    GROWTHINCREMENT_DEFAULT,
 } from './common.js';
 
 /**
  * Create with `EncoderOptions`
  */
-export class JPEncode<ContextType = undefined> extends JPBase {
+export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
     private readonly extensionCodec: JPExtensionCodecType<ContextType>;
 
     private readonly context: ContextType;
@@ -39,9 +40,9 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
     private depth = 0;
 
-    ////////////////////////
-    // #region CONSTANTS 
-    ////////////////////////
+    ////////////////
+    // CONSTANTS  //
+    ////////////////
 
     /**
      * JP or PJ
@@ -98,11 +99,11 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         this.growthIncrement = encodeOptions?.growthIncrement ? encodeOptions.growthIncrement : GROWTHINCREMENT_DEFAULT;
     };
 
-    private clone(): JPEncode<ContextType> {
+    private clone(): JPEncodeAsync<ContextType> {
         // Because of slightly special argument `context`,
         // type assertion is needed.
         // @ts-ignore
-        const clone = new JPEncode<ContextType>({
+        const clone = new JPEncodeAsync<ContextType>({
             extensionCodec: this.extensionCodec as JPExtensionCodecType<ContextType>,
 
             context: this.context as ContextType,
@@ -128,14 +129,14 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
         clone.useFile = this.useFile;
 
-        clone.valueWriter = this.valueWriter;
+        clone.valueWriterAsync = this.valueWriterAsync;
 
-        clone.strWriter = this.strWriter;
+        clone.strWriterAsync = this.strWriterAsync;
 
         clone.keysArray = this.keysArray;
 
-        clone.compWriter = this.compWriter;  
-
+        clone.compWriterAsync = this.compWriterAsync;            
+        //TODO may need more here
         return clone;
     };
 
@@ -146,11 +147,11 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param {string} filePath - Optional file path to write the file to directly
      * @returns {Buffer}
      */
-    public encode(object: unknown, filePath?: string): Buffer {
+    public async encode(object: unknown, filePath?: string): Promise<Buffer> {
         if (this.entered) {
             const instance = this.clone();
 
-            return instance.encode(object, filePath);
+            return await instance.encode(object, filePath);
         }
 
         this.fileName = filePath ? filePath : "";
@@ -162,61 +163,59 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         try {
             this.entered = true;
 
-            this.reinitializeState();
+            await this.reinitializeState();
 
-            if (this.valueWriter == null || this.strWriter == null) {
+            if (this.valueWriterAsync == null || this.strWriterAsync == null) {
                 this.throwError(" Didn't create writers. " + this.fileName);
             }
 
-            this.doEncode(this.valueWriter, object, 1);
+            await this.doEncode(this.valueWriterAsync, object, 1);
 
-            this.valueWriter.ubyte = JPType.FINISHED;
+            await this.valueWriterAsync.ubyte(JPType.FINISHED);
 
-            this.valueWriter.trim();
+            await this.valueWriterAsync.trim();
 
-            this.valueWriter.commit();
+            this.VALUE_SIZE = this.valueWriterAsync.size;
 
-            this.VALUE_SIZE = this.valueWriter.size;
+            await this.writeStringsData();
 
-            this.writeStringsData();
+            await this.strWriterAsync.ubyte(JPType.FINISHED);
 
-            this.strWriter.ubyte = JPType.FINISHED;
+            await this.strWriterAsync.trim();
 
-            this.strWriter.trim();
-
-            this.strWriter.commit();
-  
-            this.STR_SIZE = this.strWriter.size;
+            this.STR_SIZE = this.strWriterAsync.size;
 
             if (this.KeyStripped) {
                 this.keysArray = this.keyList.getValues();
             }
 
-            this.finalizeBuffers();
+            await this.finalizeBuffers();
 
-            this.headerBuffer = this.buildHeader();
-
-            if (this.compWriter == null) {
+            this.headerBuffer = await this.buildHeader();
+            
+            if (this.compWriterAsync == null) {
                 this.throwError(" Didn't create writer. " + this.fileName);
             }
+            
+            const newOff = BigInt(this.compWriterAsync.size + this.headerBuffer.length);
 
-            const newOff = this.compWriter.offset + this.headerBuffer.length;
+            await this.compWriterAsync.unshift(this.headerBuffer, false);
+            
+            await this.compWriterAsync.goto(Number(newOff));
 
-            this.compWriter.gotoStart();
+            await this.compWriterAsync.trim();
 
-            this.compWriter.unshift(this.headerBuffer, true);
+            await this.compWriterAsync.commit();
 
-            this.compWriter.goto(newOff);
+            if(this.useFile){
+                await this.compWriterAsync.renameFile(this.fileName);
 
-            this.compWriter.trim();
+                await this.compWriterAsync.close();
 
-            this.compWriter.commit();
-
-            const compBuffer = this.compWriter.data;
-
-            this.compWriter.close();
-
-            return compBuffer as Buffer;
+                return Buffer.alloc(0);
+            } else {
+                return await this.compWriterAsync.getData() as Buffer;
+            }
         } catch (err) {
             console.error(err);
 
@@ -226,77 +225,87 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         }
     };
 
-    private reinitializeState() {
+    private async reinitializeState() {
         if (this.useFile) {
-            this.valueWriter = new BiWriter(this.fileName + ".values", { windowSize: this.growthIncrement, growthIncrement: this.growthIncrement });
+            if(fileExists(this.fileName + ".values")){
+                await fsp.unlink(this.fileName + ".values");
+            }
 
-            this.valueWriter.open();
+            this.valueWriterAsync = new BiWriterAsync(this.fileName + ".values", { windowSize: this.growthIncrement, growthIncrement: this.growthIncrement });
 
-            this.valueWriter.endian = this.endian;
+            await this.valueWriterAsync.open();
 
-            this.strWriter = new BiWriter(this.fileName + ".strings", { windowSize: this.growthIncrement, growthIncrement: this.growthIncrement });
+            this.valueWriterAsync.endian = this.endian;
 
-            this.strWriter.open();
+            if(fileExists(this.fileName + ".strings")){
+                await fsp.unlink(this.fileName + ".strings");
+            }
 
-            this.strWriter.endian = this.endian;
+            this.strWriterAsync = new BiWriterAsync(this.fileName + ".strings", { windowSize: this.growthIncrement,growthIncrement: this.growthIncrement });
+
+            await this.strWriterAsync.open();
+
+            this.strWriterAsync.endian = this.endian;
         } else {
-            this.valueWriter = new BiWriter(Buffer.alloc(this.growthIncrement), { windowSize: this.growthIncrement, growthIncrement: this.growthIncrement });
+            this.valueWriterAsync = new BiWriterAsync(Buffer.alloc(this.growthIncrement), {growthIncrement: this.growthIncrement });
 
-            this.valueWriter.endian = this.endian;
+            this.valueWriterAsync.endian = this.endian;
 
-            this.strWriter = new BiWriter(Buffer.alloc(this.growthIncrement), { windowSize: this.growthIncrement, growthIncrement: this.growthIncrement });
+            this.strWriterAsync = new BiWriterAsync(Buffer.alloc(this.growthIncrement), { growthIncrement: this.growthIncrement });
 
-            this.strWriter.endian = this.endian;
+            this.strWriterAsync.endian = this.endian;
         }
     };
 
-    private doEncode(valueWriter:BiWriter<any, any>, object: unknown, depth: number) {
+    private async doEncode(valueWriter:BiWriterAsync<any, any>, object: unknown, depth: number) {
         this.depth = depth;
 
         if (object === null) {
-            return this.encodeNull(valueWriter);
+            return await this.encodeNull(valueWriter);
         } else if (object === undefined) {
-            return this.encodeUndefined(valueWriter);
+            return await this.encodeUndefined(valueWriter);
         } else if (typeof object === "boolean") {
-            return this.encodeBoolean(valueWriter, object);
+            return await this.encodeBoolean(valueWriter, object);
         } else if (typeof object === "number") {
-            return this.encodeNumber(valueWriter, object);
+            return await this.encodeNumber(valueWriter, object);
         } else if (typeof object === "string") {
-            return this.encodeString(valueWriter, object, false);
+            return await this.encodeString(valueWriter, object, false);
         } else if (typeof object === "bigint") {
-            return this.encodeBigInt64(valueWriter, object);
+            return await this.encodeBigInt64(valueWriter, object);
         } else if (typeof object === "symbol") {
-            return this.encodeSymbol(valueWriter, object); // EXT
+            return await this.encodeSymbol(valueWriter, object); // EXT
         } else {
             // if (typeof object === "object")
-            const ext = this.extensionCodec.tryToEncode(object, this, this.context);
-
+            const ext = await this.extensionCodec.tryToEncodeAsync(object, this, this.context);
+            
             if (ext != null) {
-                return this.encodeExtension(valueWriter, ext); //EXT
+                return await this.encodeExtension(valueWriter, ext); //EXT
             } else if (Array.isArray(object)) {
-                return this.encodeArray(valueWriter, object, this.depth);
+                return await this.encodeArray(valueWriter, object, this.depth);
             } else if (object instanceof Map) {
-                return this.encodeMap(valueWriter, object, this.depth); // EXT
+                return await this.encodeMap(valueWriter, object, this.depth); // EXT
             } else if (object instanceof Set) {
-                return this.encodeSet(valueWriter, object, this.depth); // EXT
+                return await this.encodeSet(valueWriter, object, this.depth); // EXT
             } else if (object instanceof RegExp) {
-                return this.encodeRegEx(valueWriter, object); // EXT
+                return await this.encodeRegEx(valueWriter, object); // EXT
             } else if (ArrayBuffer.isView(object) || object instanceof Buffer) {
-                return this.encodeBinary(valueWriter, object); // EXT
+                return await this.encodeBinary(valueWriter, object); // EXT
             } else if (object instanceof Date) {
-                return this.encodeDate(valueWriter, object); // EXT
+                return await this.encodeDate(valueWriter, object); // EXT
             } else if (typeof object === "object") {
-                return this.encodeObject(valueWriter, object as Record<string, unknown>, this.depth);
+                return await this.encodeObject(valueWriter, object as Record<string, unknown>, this.depth);
             } else {
                 // function and other special object come here unless extensionCodec handles them.
                 this.throwError(`Unrecognized object: ${Object.prototype.toString.apply(object)} ` + this.fileName);
             }
         }
+
+        return;
     };
 
-    ////////////////////////
-    // #region STANDARD
-    ////////////////////////
+    //////////////
+    // STANDARD //
+    //////////////
 
     /**
      * Writes an `Object` to the buffer as `Record<string, unknown>`
@@ -306,7 +315,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param depth - Level depth within the master object. Leave blank unless you have a reason for adding to running loop.
      * @returns The `number` of bytes written
      */
-    encodeObject(valueWriter: BiWriter<any, any>, object: Record<string, unknown>, depth?: number) {
+    async encodeObject(valueWriter: BiWriterAsync<any, any>, object: Record<string, unknown>, depth?: number) {
         if(depth == undefined){
             depth = this.depth;
         }
@@ -319,26 +328,26 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
         if (size < 16) {
             // fixmap
-            valueWriter.ubyte = JPType.OBJECT_0 + size;
+            await valueWriter.ubyte(JPType.OBJECT_0 + size);
         } else if (size < 0x100) {
             // map 8
-            valueWriter.ubyte = JPType.OBJECT8;
+            await valueWriter.ubyte(JPType.OBJECT8);
 
-            valueWriter.ubyte = size;
+            await valueWriter.ubyte(size);
 
             length++;
         } else if (size < 0x10000) {
             // map 16
-            valueWriter.ubyte = JPType.OBJECT16;
+            await valueWriter.ubyte(JPType.OBJECT16);
 
-            valueWriter.ushort = size;
+            await valueWriter.ushort(size);
 
             length += 2;
         } else if (size < 0x100000000) {
             // map 32
-            valueWriter.ubyte = JPType.OBJECT32;
+            await valueWriter.ubyte(JPType.OBJECT32);
 
-            valueWriter.uint32 = size;
+            await valueWriter.uint32(size);
 
             length += 4;
         } else {
@@ -348,11 +357,12 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         for (const key of keys) {
             const value = object[key];
 
-            length += this.encodeString(valueWriter, key, true);
+            length += await this.encodeString(valueWriter, key, true);
 
-            length += this.doEncode(valueWriter, value, depth + 1);
+            length += await this.doEncode(valueWriter,  value, depth + 1);
 
         }
+
         return length;
     };
 
@@ -364,7 +374,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param depth - Level depth within the master object. Leave blank unless you have a reason for adding to running loop.
      * @returns The `number` of bytes written
      */
-    encodeArray(valueWriter:BiWriter<any, any>, array: Array<unknown>, depth?: number) {
+    async encodeArray(valueWriter:BiWriterAsync<any, any>, array: Array<unknown>, depth?: number) {
         if(depth == undefined){
             depth = this.depth;
         }
@@ -375,26 +385,26 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
         if (size < 16) {
             // fixarray
-            valueWriter.ubyte = JPType.ARRAY_0 + size;
+            await valueWriter.ubyte(JPType.ARRAY_0 + size);
         } else if (size < 0x100) {
             // uint8
-            valueWriter.ubyte = JPType.ARRAY8;
+            await valueWriter.ubyte(JPType.ARRAY8);
 
-            valueWriter.ubyte = size;
+            await valueWriter.ubyte(size);
 
             length++;
         } else if (size < 0x10000) {
             // array 16
-            valueWriter.ubyte = JPType.ARRAY16;
+            await valueWriter.ubyte(JPType.ARRAY16);
 
-            valueWriter.ushort = size;
+            await valueWriter.ushort(size);
 
             length += 2;
         } else if (size < 0x100000000) {
             // array 32
-            valueWriter.ubyte = JPType.ARRAY32;
+            await valueWriter.ubyte(JPType.ARRAY32);
 
-            valueWriter.uint32 = size;
+            await valueWriter.uint32(size);
 
             length += 4;
         } else {
@@ -402,7 +412,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         }
 
         for (const item of array) {
-            length += this.doEncode(valueWriter, item, depth + 1);
+            length += await this.doEncode(valueWriter, item, depth + 1);
         }
 
         return length;
@@ -416,7 +426,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param isKey If the string is used a an Object key. Only used when `stripKeys` is enabled.
      * @returns The `number` of bytes written
      */
-    encodeString(valueWriter:BiWriter<any, any>, string: string, isKey?: boolean) {
+    async encodeString(valueWriter:BiWriterAsync<any, any>, string: string, isKey?: boolean) {
         if(isKey == undefined){
             isKey = false;
         }
@@ -427,26 +437,26 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             const index = this.keyList.add(string);
 
             if (index < 16) {
-                valueWriter.ubyte = JPType.KEY_0 + index;
+                await valueWriter.ubyte(JPType.KEY_0 + index);
             } else if (index < 0x100) {
                 // uint8
-                valueWriter.ubyte = JPType.KEY8;
+                await valueWriter.ubyte(JPType.KEY8);
 
-                valueWriter.ubyte = index;
+                await valueWriter.ubyte(index);
 
                 length++;
             } else if (index < 0x10000) {
                 // unit16
-                valueWriter.ubyte = JPType.KEY16;
+                await valueWriter.ubyte(JPType.KEY16);
 
-                valueWriter.ushort = index;
+                await valueWriter.ushort(index);
 
                 length += 2;
             } else if (index < 0x100000000) {
                 // unit32
-                valueWriter.ubyte = JPType.KEY32;
+                await valueWriter.ubyte(JPType.KEY32);
 
-                valueWriter.uint32 = index;
+                await valueWriter.uint32(index);
 
                 length += 4;
             } else {
@@ -456,26 +466,26 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             const index = this.stringList.add(string);
 
             if (index < 16) {
-                valueWriter.ubyte = JPType.STR_0 + index;
+                await valueWriter.ubyte(JPType.STR_0 + index);
             } else if (index < 0x100) {
                 // uint8
-                valueWriter.ubyte = JPType.STR8;
+                await valueWriter.ubyte(JPType.STR8);
 
-                valueWriter.ubyte = index;
+                await valueWriter.ubyte(index);
 
                 length++;
             } else if (index < 0x10000) {
                 // unit16
-                valueWriter.ubyte = JPType.STR16;
+                await valueWriter.ubyte(JPType.STR16);
 
-                valueWriter.ushort = index;
+                await valueWriter.ushort(index);
 
                 length += 2;
             } else if (index < 0x100000000) {
                 // unit32
-                valueWriter.ubyte = JPType.STR32;
+                await valueWriter.ubyte(JPType.STR32);
 
-                valueWriter.uint32 = index;
+                await valueWriter.uint32(index);
 
                 length += 4;
             } else {
@@ -492,8 +502,8 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param valueWriter - Writer
      * @returns The `number` of bytes written
      */
-    encodeNull(valueWriter:BiWriter<any, any>) {
-        valueWriter.ubyte = JPType.NULL;
+    async encodeNull(valueWriter:BiWriterAsync<any, any>) {
+        await valueWriter.ubyte(JPType.NULL);
 
         return 1;
     };
@@ -504,8 +514,8 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param valueWriter - Writer
      * @returns The `number` of bytes written
      */
-    encodeUndefined(valueWriter:BiWriter<any, any>) {
-        valueWriter.ubyte = JPType.UNDEFINED;
+    async encodeUndefined(valueWriter:BiWriterAsync<any, any>) {
+        await valueWriter.ubyte(JPType.UNDEFINED);
 
         return 1;
     };
@@ -517,11 +527,11 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param object - `true` or `false`
      * @returns The `number` of bytes written
      */
-    encodeBoolean(valueWriter:BiWriter<any, any>, object: boolean) {
+    async encodeBoolean(valueWriter:BiWriterAsync<any, any>, object: boolean) {
         if (object === false) {
-            valueWriter.ubyte = JPType.BOOL_FALSE;
+            await valueWriter.ubyte(JPType.BOOL_FALSE);
         } else {
-            valueWriter.ubyte = JPType.BOOL_TRUE;
+            await valueWriter.ubyte(JPType.BOOL_TRUE);
         }
 
         return 1;
@@ -533,8 +543,8 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param valueWriter - Writer
      * @returns The `number` of bytes written
      */
-    encodeFinished(valueWriter:BiWriter<any, any>){
-        valueWriter.ubyte = JPType.FINISHED;
+    async encodeFinished(valueWriter:BiWriterAsync<any, any>){
+        await valueWriter.ubyte(JPType.FINISHED);
 
         return 1;
     };
@@ -545,8 +555,8 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param valueWriter - Writer
      * @returns The `number` of bytes written
      */
-    encodeListEnd(valueWriter:BiWriter<any, any>){
-        valueWriter.ubyte = JPType.LIST_END;
+    async encodeListEnd(valueWriter:BiWriterAsync<any, any>){
+        await valueWriter.ubyte(JPType.LIST_END);
 
         return 1;
     };
@@ -560,73 +570,73 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param number - Data to encode
      * @returns The `number` of bytes written
      */
-    encodeNumber(valueWriter:BiWriter<any, any>, number: number) {
+    async encodeNumber(valueWriter:BiWriterAsync<any, any>, number: number) {
         var length = 1;
 
         if (Number.isSafeInteger(number)) {
             if (number >= 0) {
                 if (number < 0x80) {
                     // positive fixint
-                    valueWriter.ubyte = number;
+                    await valueWriter.ubyte(number);
                 } else if (number < 0x100) {
                     // uint 8
-                    valueWriter.ubyte = JPType.UINT_8;
+                    await valueWriter.ubyte(JPType.UINT_8);
 
-                    valueWriter.ubyte = number;
+                    await valueWriter.ubyte(number);
 
                     length++;
                 } else if (number < 0x10000) {
                     // uint 16
-                    valueWriter.ubyte = JPType.UINT_16;
+                    await valueWriter.ubyte(JPType.UINT_16);
 
-                    valueWriter.ushort = number;
+                    await valueWriter.ushort(number);
 
                     length += 2;
                 } else if (number < 0x100000000) {
                     // uint 32
-                    valueWriter.ubyte = JPType.UINT_32;
+                    await valueWriter.ubyte(JPType.UINT_32);
 
-                    valueWriter.uint32 = number;
+                    await valueWriter.uint32(number);
 
                     length += 4;
                 } else {
                     // uint 64
-                    valueWriter.ubyte = JPType.UINT_64;
+                    await valueWriter.ubyte(JPType.UINT_64);
 
-                    valueWriter.uint64 = number;
+                    await valueWriter.uint64(number);
 
                     length += 8;
                 }
             } else {
                 if (number >= -0x20) {
                     // negative fixint
-                    valueWriter.byte = number;
+                    await valueWriter.byte(number);
                 } else if (number >= -0x80) {
                     // int 8
-                    valueWriter.ubyte = JPType.INT_8;
+                    await valueWriter.ubyte(JPType.INT_8);
 
-                    valueWriter.byte = number;
+                    await valueWriter.byte(number);
 
                     length++;
                 } else if (number >= -0x8000) {
                     // int 16
-                    valueWriter.ubyte = JPType.INT_16;
+                    await valueWriter.ubyte(JPType.INT_16);
 
-                    valueWriter.int16 = number;
+                    await valueWriter.int16(number);
 
                     length += 2;
                 } else if (number >= -0x80000000) {
                     // int 32
-                    valueWriter.ubyte = JPType.INT_32;
+                    await valueWriter.ubyte(JPType.INT_32);
 
-                    valueWriter.int32 = number;
+                    await valueWriter.int32(number);
 
                     length += 4;
                 } else {
                     // int 64
-                    valueWriter.ubyte = JPType.INT_64;
+                    await valueWriter.ubyte(JPType.INT_64);
 
-                    valueWriter.int64 = number;
+                    await valueWriter.int64(number);
 
                     length += 8;
                 }
@@ -634,7 +644,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             return length;
         } else {
-            return this.encodeNumberAsFloat(valueWriter, number);
+            return await this.encodeNumberAsFloat(valueWriter, number);
         }
     };
 
@@ -645,106 +655,107 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param bigint - Data to encode
      * @returns The `number` of bytes written
      */
-    encodeBigInt64(valueWriter:BiWriter<any, any>, bigint: bigint) {
+    async encodeBigInt64(valueWriter:BiWriterAsync<any, any>, bigint: bigint) {
         var length = 0;
 
         if (bigint >= BigInt(0)) {
             // uint 64
-            valueWriter.ubyte = JPType.UINT_64; length++;
+            await valueWriter.ubyte(JPType.UINT_64); length++;
 
-            valueWriter.uint64 = bigint; length += 8;
+            await valueWriter.uint64(bigint); length += 8;
         } else {
             // int 64
-            valueWriter.ubyte = JPType.INT_64; length++;
+            await valueWriter.ubyte(JPType.INT_64); length++;
 
-            valueWriter.int64 = bigint; length += 8;
+            await valueWriter.int64(bigint); length += 8;
         }
-
+        
         return length;
     };
 
-    private encodeStringHeader(byteLength: number) {
+    private async encodeStringHeader(byteLength: number) {
         var length = 1;
 
-        if (this.strWriter == null) {
+        if (this.strWriterAsync == null) {
             this.throwError(" Didn't create writer. " + this.fileName);
         }
 
         if (byteLength < 16) {
             // fixstr
-            this.strWriter.ubyte = JPType.STR_0 + byteLength;
+            await this.strWriterAsync.ubyte(JPType.STR_0 + byteLength);
         } else if (byteLength < 0x100) {
             // str 8
-            this.strWriter.ubyte = JPType.STR8;
+            await this.strWriterAsync.ubyte(JPType.STR8);
 
-            this.strWriter.ubyte = byteLength;
+            await this.strWriterAsync.ubyte(byteLength);
 
             length++;
         } else if (byteLength < 0x10000) {
             // str 16
-            this.strWriter.ubyte = JPType.STR16;
+            await this.strWriterAsync.ubyte(JPType.STR16);
 
-            this.strWriter.uint16 = byteLength;
+            await this.strWriterAsync.uint16(byteLength);
 
             length += 2;
         } else if (byteLength < 0x100000000) {
             // str 32
-            this.strWriter.ubyte = JPType.STR32;
+            await this.strWriterAsync.ubyte(JPType.STR32);
 
-            this.strWriter.uint32 = byteLength;
+            await this.strWriterAsync.uint32(byteLength);
 
             length += 4;
         } else {
             this.throwError(`Too long string: ${byteLength} bytes in UTF-8 in file ` + this.fileName);
         }
+
         return length;
     };
 
-    private writeString(object: string) {
-        if (this.strWriter == null) {
+    private async writeString(object: string) {
+        if (this.strWriterAsync == null) {
             this.throwError(" Didn't create writer. " + this.fileName);
         }
 
         const encoder = new TextEncoder();
 
         const encodedString = encoder.encode(object);
-        
+
         const byteLength = encodedString.length;
 
-        var length = this.encodeStringHeader(byteLength);
+        var length = await this.encodeStringHeader(byteLength);
 
-        this.strWriter.string(object, { length: byteLength });
+        await this.strWriterAsync.string(object, { length: byteLength });
 
         return length + byteLength;
     };
 
-    private writeStringsData() {
+    private async writeStringsData() {
         const array = this.stringList.getValues();
 
         const size = array.length;
 
-        if (this.strWriter == null) {
+        if (this.strWriterAsync == null) {
             this.throwError(" Didn't create writer. " + this.fileName);
         }
 
         if (size < 16) {
             // fixarray
-            this.strWriter.ubyte = JPType.ARRAY_0 + size;
+            await this.strWriterAsync.ubyte(JPType.ARRAY_0 + size);
         } else if (size < 0x100) {
             // uint8
-            this.strWriter.ubyte = JPType.ARRAY8;
+            await this.strWriterAsync.ubyte(JPType.ARRAY8);
 
-            this.strWriter.ubyte = size;
+            await this.strWriterAsync.ubyte(size);
         } else if (size < 0x10000) {
             // array 16
-            this.strWriter.ubyte = JPType.ARRAY16;
+            await this.strWriterAsync.ubyte(JPType.ARRAY16);
 
-            this.strWriter.ushort = size;
+            await this.strWriterAsync.ushort(size);
         } else if (size < 0x100000000) {
             // array 32
-            this.strWriter.ubyte = JPType.ARRAY32;
+            await this.strWriterAsync.ubyte(JPType.ARRAY32);
 
-            this.strWriter.uint32 = size;
+            await this.strWriterAsync.uint32(size);
         } else {
             this.throwError(`String array too large: ${size} in file ` + this.fileName);
         }
@@ -752,25 +763,25 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         for (let i = 0; i < size; i++) {
             const el = array[i];
 
-            this.writeString(el);
+            await this.writeString(el);
         }
     };
 
-    private encodeNumberAsFloat(valueWriter:BiWriter<any, any>, object: number) {
+    private async encodeNumberAsFloat(valueWriter:BiWriterAsync<any, any>, object: number) {
         var length = 1;
 
         if (isFloat32Safe(object)) {
             // float 32
-            valueWriter.ubyte = JPType.FLOAT32;
+            await valueWriter.ubyte(JPType.FLOAT32);
 
-            valueWriter.float = object;
+            await valueWriter.float(object);
 
             length += 4;
         } else {
             // float 64
-            valueWriter.ubyte = JPType.FLOAT64;
-
-            valueWriter.dfloat = object;
+            await valueWriter.ubyte(JPType.FLOAT64);
+            
+            await valueWriter.dfloat(object);
 
             length += 8;
         }
@@ -778,45 +789,45 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         return length;
     };
 
-    ////////////////////
-    //  #region EXTS
-    ////////////////////
+    ////////////
+    //  EXTS  //
+    ////////////
 
-    private encodeExtension(valueWriter:BiWriter<any, any>, ext: JPExtData) {
+    private async encodeExtension(valueWriter:BiWriterAsync<any, any>, ext: JPExtData) {
         const size = ext.data.length;
 
         var length = size;
 
         if (size < 0x100) {
             // ext 8
-            valueWriter.ubyte = JPType.EXT8;
+            await valueWriter.ubyte(JPType.EXT8);
 
-            valueWriter.ubyte = size;
+            await valueWriter.ubyte(size);
 
             length += 2;
         } else if (size < 0x10000) {
             // ext 16
-            valueWriter.ubyte = JPType.EXT16;
+            await valueWriter.ubyte(JPType.EXT16);
 
-            valueWriter.ushort = size;
+            await valueWriter.ushort(size);
 
             length += 3;
         } else if (size < 0x100000000) {
             // ext 32
-            valueWriter.ubyte = JPType.EXT32;
+            await valueWriter.ubyte(JPType.EXT32);
 
-            valueWriter.uint32 = size;
+            await valueWriter.uint32(size);
 
             length += 5;
         } else {
             this.throwError( `Too large extension object: ${size} in file ` + this.fileName);
         }
 
-        valueWriter.ubyte = ext.type;
+        await valueWriter.ubyte(ext.type);
 
         length++;
 
-        valueWriter.overwrite(ext.data, valueWriter.offset, true);
+        await valueWriter.overwrite(ext.data, valueWriter.offset, true);
 
         return length;
     };
@@ -829,7 +840,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param depth - Level depth within the master object. Leave blank unless you have a reason for adding to running loop.
      * @returns The `number` of bytes written
      */
-    encodeMap<K, V>(valueWriter: BiWriter<any, any>, object: Map<K, V>, depth?: number) {
+    async encodeMap<K, V>(valueWriter: BiWriterAsync<any, any>, object: Map<K, V>, depth?: number) {
         if(depth == undefined){
             depth = this.depth;
         }
@@ -842,37 +853,37 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         const size = object.size;
 
         if (size < 0x100) {
-            valueWriter.ubyte = JPType.EXT8;
+            await valueWriter.ubyte(JPType.EXT8);
 
-            valueWriter.ubyte = size;
+            await valueWriter.ubyte(size);
 
             length++;
         } else if (size < 0x10000) {
-            valueWriter.ubyte = JPType.EXT16;
+            await valueWriter.ubyte(JPType.EXT16);
 
-            valueWriter.ushort = size;
+            await valueWriter.ushort(size);
 
             length += 2;
         } else if (size < 0x100000000) {
-            valueWriter.ubyte = JPType.EXT32;
+            await valueWriter.ubyte(JPType.EXT32);
 
-            valueWriter.uint32 = size;
+            await valueWriter.uint32(size);
 
             length += 4;
         } else {
             this.throwError(`Too large Set length: ${size} in file ` + this.fileName);
         }
 
-        this.valueWriter.ubyte = JPExtType.Maps; length++;
+        await this.valueWriterAsync.ubyte(JPExtType.Maps); length++;
 
         for (const key of keys) {
             const value = object.get(key);
 
-            length += this.doEncode(valueWriter, key, depth + 1); // keys can have any type here
+            length += await this.doEncode(valueWriter, key, depth + 1); // keys can have any type here
 
             //this.valueWriter.ubyte = JPType.LIST_END; length++;
 
-            length += this.doEncode(valueWriter, value, depth + 1);
+            length += await this.doEncode(valueWriter, value, depth + 1);
 
             //this.valueWriter.ubyte = JPType.LIST_END; length++;
         }
@@ -888,7 +899,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param depth - Level depth within the master object. Leave blank unless you have a reason for adding to running loop.
      * @returns The `number` of bytes written
      */
-    encodeSet<T>(valueWriter: BiWriter<any, any>, object: Set<T>, depth?: number) {
+    async encodeSet<T>(valueWriter: BiWriterAsync<any, any>, object: Set<T>, depth?: number) {
         if(depth == undefined){
             depth = this.depth;
         }
@@ -899,31 +910,31 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         const size = object.size;
 
         if (size < 0x100) {
-            valueWriter.ubyte = JPType.EXT8;
+            await valueWriter.ubyte(JPType.EXT8);
 
-            valueWriter.ubyte = size;
+            await valueWriter.ubyte(size);
 
             length++;
         } else if (size < 0x10000) {
-            valueWriter.ubyte = JPType.EXT16;
+            await valueWriter.ubyte(JPType.EXT16);
 
-            valueWriter.ushort = size;
+            await valueWriter.ushort(size);
 
             length += 2;
         } else if (size < 0x100000000) {
-            valueWriter.ubyte = JPType.EXT32;
+            await valueWriter.ubyte(JPType.EXT32);
 
-            valueWriter.uint32 = size;
+            await valueWriter.uint32(size);
 
             length += 4;
         } else {
             this.throwError(`Too large Set length: ${size} in file ` + this.fileName);
         }
 
-        this.valueWriter.ubyte = JPExtType.Sets;
+        await this.valueWriterAsync.ubyte(JPExtType.Sets);
 
         for (const item of object) {
-            length += this.doEncode(valueWriter, item, depth + 1);
+            length += await this.doEncode(valueWriter, item, depth + 1);
 
             // this.valueWriter.ubyte = JPType.LIST_END; length++;
         }
@@ -938,8 +949,8 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param object - Data to encode
      * @returns The `number` of bytes written
      */
-    encodeSymbol(valueWriter: BiWriter<any, any>, object: symbol) {
-        const extBuffer = new BiWriter(Buffer.alloc(512), {windowSize: this.growthIncrement, growthIncrement: this.growthIncrement });
+    async encodeSymbol(valueWriter: BiWriterAsync<any, any>, object: symbol) {
+        const extBuffer = new BiWriterAsync(Buffer.alloc(512));
 
         const keyCheck = Symbol.keyFor(object);
 
@@ -951,32 +962,34 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
         var length = 0;
 
-        length += this.encodeBoolean(extBuffer, global);
+        length += await this.encodeBoolean(extBuffer, global);
 
-        length += this.encodeString(extBuffer, key, false);
+        length += await this.encodeString(extBuffer, key, false);
 
-        extBuffer.trim();
+        await extBuffer.trim();
 
         if(length < 0x100) {
-            valueWriter.ubyte = JPType.EXT8;
+            await valueWriter.ubyte(JPType.EXT8);
 
-            valueWriter.ubyte = length;
+            await valueWriter.ubyte(length);
         } else if (length < 0x10000) {
-            valueWriter.ubyte = JPType.EXT16;
+            await valueWriter.ubyte(JPType.EXT16);
 
-            valueWriter.ushort = length;
+            await valueWriter.ushort(length);
         } else if (length < 0x100000000) {
-            valueWriter.ubyte = JPType.EXT32;
+            await valueWriter.ubyte(JPType.EXT32);
 
-            valueWriter.uint = length;
+            await valueWriter.uint(length);
         } else {
             this.throwError(`Too large Symbol length: ${length} in file ` + this.fileName);
         }
 
-        valueWriter.ubyte = JPExtType.Symbol;
+        await valueWriter.ubyte(JPExtType.Symbol);
+        
+        const data = await extBuffer.getData() as Buffer
 
-        valueWriter.overwrite(extBuffer.return() as Buffer, valueWriter.offset, true);
-
+        await valueWriter.overwrite(data, valueWriter.offset, true);
+        
         return length;
     };
 
@@ -987,8 +1000,8 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param object - Data to encode
      * @returns The `number` of bytes written
      */
-    encodeRegEx(valueWriter: BiWriter<any, any>, object: RegExp) {
-        const extBuffer = new BiWriter(Buffer.alloc(512), {windowSize: this.growthIncrement, growthIncrement: this.growthIncrement });
+    async encodeRegEx(valueWriter: BiWriterAsync<any, any>, object: RegExp) {
+        const extBuffer = new BiWriterAsync(Buffer.alloc(512), { growthIncrement: this.growthIncrement });
 
         const src = object.source;
 
@@ -996,31 +1009,33 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
         var length = 0;
 
-        length += this.encodeString(extBuffer, src, false);
+        length += await this.encodeString(extBuffer, src, false);
 
-        length += this.encodeString(extBuffer, flags, false);
+        length += await this.encodeString(extBuffer, flags, false);
 
-        extBuffer.trim();
+        await extBuffer.trim();
 
         if(length < 0x100) {
-            valueWriter.ubyte = JPType.EXT8;
+            await valueWriter.ubyte(JPType.EXT8);
 
-            valueWriter.ubyte = length;
+            await valueWriter.ubyte(length);
         } else if (length < 0x10000) {
-            valueWriter.ubyte = JPType.EXT16;
+            await valueWriter.ubyte(JPType.EXT16);
 
-            valueWriter.ushort = length;
+            await valueWriter.ushort(length);
         } else if (length < 0x100000000) {
-            valueWriter.ubyte = JPType.EXT32;
+            await valueWriter.ubyte(JPType.EXT32);
 
-            valueWriter.uint = length;
+            await valueWriter.uint(length);
         } else {
             this.throwError(`Too large RegEx length: ${length} in file ` + this.fileName);
         }
 
-        valueWriter.ubyte = JPExtType.RegEx;
+        await valueWriter.ubyte(JPExtType.RegEx);
 
-        valueWriter.overwrite(extBuffer.return() as Buffer, valueWriter.offset, true);
+        const data = await extBuffer.getData();
+
+        await valueWriter.writeUBytes(<unknown> data as number[], true);
 
         return length;
     };
@@ -1032,27 +1047,27 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param object - Data to encode
      * @returns The `number` of bytes written
      */
-    encodeBinary(valueWriter: BiWriter<any, any>, object: Buffer | ArrayBufferView) {
+    async encodeBinary(valueWriter: BiWriterAsync<any, any>, object: Buffer | ArrayBufferView) {
         var length = 1;
 
         const byteLength = object.byteLength;
 
         if (byteLength < 0x100) {
-            valueWriter.ubyte = JPType.EXT8;
+            await valueWriter.ubyte(JPType.EXT8);
 
-            valueWriter.ubyte = byteLength;
+            await valueWriter.ubyte(byteLength);
 
             length++;
         } else if (byteLength < 0x10000) {
-            valueWriter.ubyte = JPType.EXT16;
+            await valueWriter.ubyte(JPType.EXT16);
 
-            valueWriter.ushort = byteLength;
+            await valueWriter.ushort(byteLength);
 
             length += 2;
         } else if (byteLength < 0x100000000) {
-            valueWriter.ubyte = JPType.EXT32;
+            await valueWriter.ubyte(JPType.EXT32);
 
-            valueWriter.uint32 = byteLength;
+            await valueWriter.uint32(byteLength);
 
             length += 4;
         } else {
@@ -1060,37 +1075,37 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         }
 
         if (object instanceof Buffer) {
-            valueWriter.ubyte = JPExtType.Buffer; length++;
+            await valueWriter.ubyte(JPExtType.Buffer); length++;
 
-            valueWriter.overwrite(object, valueWriter.offset, true);
+            await valueWriter.overwrite(object, valueWriter.offset, true);
 
             length += object.length;
         } else {
             if (object instanceof Int8Array) {
-                valueWriter.ubyte = JPExtType.Int8Array;
+                await valueWriter.ubyte(JPExtType.Int8Array);
             } else if (object instanceof Uint8Array) {
-                valueWriter.ubyte = JPExtType.Uint8Array;
+                await valueWriter.ubyte(JPExtType.Uint8Array);
             } else if (object instanceof Uint8ClampedArray) {
-                valueWriter.ubyte = JPExtType.Uint8ClampedArray;
+                await valueWriter.ubyte(JPExtType.Uint8ClampedArray);
             } else if (object instanceof Int16Array) {
-                valueWriter.ubyte = JPExtType.Int16Array;
+                await valueWriter.ubyte(JPExtType.Int16Array);
             } else if (object instanceof Uint16Array) {
-                valueWriter.ubyte = JPExtType.Uint16Array;
+                await valueWriter.ubyte(JPExtType.Uint16Array);
             } else if (object instanceof Int32Array) {
-                valueWriter.ubyte = JPExtType.Int32Array;
+                await valueWriter.ubyte(JPExtType.Int32Array);
             } else if (object instanceof Uint32Array) {
-                valueWriter.ubyte = JPExtType.Uint32Array;
+                await valueWriter.ubyte(JPExtType.Uint32Array);
             } else if (object instanceof Float32Array) {
-                valueWriter.ubyte = JPExtType.Float32Array;
+                await valueWriter.ubyte(JPExtType.Float32Array);
             } else if (object instanceof Float64Array) {
-                valueWriter.ubyte = JPExtType.Float64Array;
+                await valueWriter.ubyte(JPExtType.Float64Array);
             } else if (object instanceof BigInt64Array) {
-                valueWriter.ubyte = JPExtType.BigInt64Array;
+                await valueWriter.ubyte(JPExtType.BigInt64Array);
             } else if (object instanceof BigUint64Array) {
-                valueWriter.ubyte = JPExtType.BigUint64Array;
+                await valueWriter.ubyte(JPExtType.BigUint64Array);
                 // @ts-ignore
             } else if(object instanceof Float16Array){
-                valueWriter.ubyte = JPExtType.Float16Array;
+                await valueWriter.ubyte(JPExtType.Float16Array);
             } else {
                 this.throwError(' Unknown Buffer type in file ' + this.fileName);
             }
@@ -1099,7 +1114,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
             const uData = new Uint8Array(object.buffer);
 
-            valueWriter.overwrite(uData, valueWriter.offset, true);
+            await valueWriter.overwrite(uData, valueWriter.offset, true);
 
             length += uData.length;
         }
@@ -1114,7 +1129,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param object - Data to encode
      * @returns The `number` of bytes written
      */
-    encodeDate(valueWriter:BiWriter<any, any>, object: Date) {
+    async encodeDate(valueWriter:BiWriterAsync<any, any>, object: Date) {
         const TIMESTAMP32_MAX_SEC = 0x100000000 - 1; // 32-bit unsigned int
 
         const TIMESTAMP64_MAX_SEC = 0x400000000 - 1; // 34-bit unsigned int
@@ -1131,52 +1146,52 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
         const nsec = _nsec - nsecInSec * 1e9;
 
-        valueWriter.ubyte = JPType.EXT8;
+        await valueWriter.ubyte(JPType.EXT8);
 
         if (sec >= 0 && nsec >= 0 && sec <= TIMESTAMP64_MAX_SEC) {
             // Here sec >= 0 && nsec >= 0
             if (nsec === 0 && sec <= TIMESTAMP32_MAX_SEC) {
                 // timestamp 32 = { sec32 (unsigned) }
 
-                valueWriter.ubyte = 4;
+                await valueWriter.ubyte(4);
 
-                valueWriter.ubyte  = JPExtType.Date;
+                await valueWriter.ubyte(JPExtType.Date);
 
-                valueWriter.uint32 = sec >>> 0;
+                await valueWriter.uint32(sec >>> 0);
 
                 return 7;
             } else {
-                valueWriter.ubyte = 8;
+                await valueWriter.ubyte(8);
 
-                valueWriter.ubyte  = JPExtType.Date;
+                await valueWriter.ubyte(JPExtType.Date);
                 // timestamp 64 = { nsec30 (unsigned), sec34 (unsigned) }
                 const secHigh = sec / 0x100000000;
 
                 const secLow = sec & 0xffffffff;
                 // nsec30 | secHigh2
-                valueWriter.uint32 = ((nsec << 2) | (secHigh & 0x3)) >>> 0;
+                await valueWriter.uint32(((nsec << 2) | (secHigh & 0x3)) >>> 0);
                 // secLow32
-                valueWriter.uint32 = secLow >>> 0;
+                await valueWriter.uint32(secLow >>> 0);
 
                 return 11;
             }
         } else {
             // timestamp 96 = { nsec32 (unsigned), sec64 (signed) }
-            valueWriter.ubyte = 12;
+            await valueWriter.ubyte(12);
 
-            valueWriter.ubyte  = JPExtType.Date;
+            await valueWriter.ubyte(JPExtType.Date);
 
-            valueWriter.uint32 = nsec >>> 0;
+            await valueWriter.uint32(nsec >>> 0);
 
-            valueWriter.int64 = sec;
+            await valueWriter.int64(sec);
 
             return 15;
         }
     };
 
-    ////////////////////////
-    // #region FINALIZE
-    ////////////////////////
+    //////////////
+    // FINALIZE //
+    //////////////
 
     /**
      * Creates headers buffer.
@@ -1188,7 +1203,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param {endian} endian 
      * @returns 
      */
-    private buildHeader(endian?: endian): Buffer {
+    private async buildHeader(endian?: endian): Promise<Buffer> {
         if (endian) {
             this.endian = endian;
         }
@@ -1197,94 +1212,93 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             this.LargeFile = 1;
         }
 
-        const bw = new BiWriter(Buffer.alloc(this.HEADER_SIZE), {windowSize: this.growthIncrement, growthIncrement: this.growthIncrement });
+        const bw = new BiWriterAsync(Buffer.alloc(this.HEADER_SIZE), { growthIncrement: this.growthIncrement });
 
         bw.endian = this.endian;
 
-        bw.uint16 = this.MAGIC;
+        await bw.uint16(this.MAGIC);
 
-        bw.uint8 = this.VERSION_MAJOR;
+        await bw.uint8(this.VERSION_MAJOR);
 
-        bw.uint8 = this.VERSION_MINOR;
+        await bw.uint8(this.VERSION_MINOR);
 
-        bw.uint8 = this.HEADER_SIZE;
+        await bw.uint8(this.HEADER_SIZE);
 
-        bw.bit1 = this.LargeFile;
+        await bw.bit1(this.LargeFile);
 
-        bw.bit1 = this.Compressed;
+        await bw.bit1(this.Compressed);
 
-        bw.bit1 = this.Crc32;
+        await bw.bit1(this.Crc32);
 
-        bw.bit1 = this.Encrypted;
+        await bw.bit1(this.Encrypted);
 
         if (this.Encrypted == 0) this.EncryptionExcluded = 0;
 
-        bw.bit1 = this.EncryptionExcluded;
+        await bw.bit1(this.EncryptionExcluded);
 
-        bw.bit1 = this.KeyStripped;
+        await bw.bit1(this.KeyStripped);
 
-        bw.bit1 = 0;  // FLAG6
+        await bw.bit1(0);  // FLAG6
 
-        bw.bit1 = 0;  // FLAG7
+        await bw.bit1(0);  // FLAG7
 
-        bw.uint8 = 0; // RESV_6 FLAG8-15
+        await bw.uint8(0); // RESV_6 FLAG8-15
 
-        bw.uint8 = 0; // RESV_7 FLAG16-23
+        await bw.uint8(0); // RESV_7 FLAG16-23
 
-        bw.uint64 = this.VALUE_SIZE;
+        await bw.uint64(this.VALUE_SIZE);
 
-        bw.uint64 = this.STR_SIZE;
+        await bw.uint64(this.STR_SIZE);
 
-        bw.uint64 = this.DATA_SIZE;
+        await bw.uint64(this.DATA_SIZE);
 
         if (this.Crc32) {
-            bw.uint32 = this.CRC32;
+            await bw.uint32(this.CRC32);
         }
 
         if (this.Encrypted && !this.EncryptionExcluded) {
-            bw.uint32 = this.encryptionKey;
+            await bw.uint32(this.encryptionKey);
         }
 
-        bw.trim();
-
-        this.headerBuffer = bw.get() as Buffer;
+        this.headerBuffer = await bw.getData() as Buffer;
 
         return this.headerBuffer;
     };
 
-    private finalizeBuffers() {
-        if (this.strWriter == null || this.valueWriter == null) {
+    private async finalizeBuffers() {
+        if (this.strWriterAsync == null || this.valueWriterAsync == null) {
             this.throwError(" Didn't create writers. " + this.fileName);
         }
-        this.valueWriter.push(this.strWriter.data, true);
 
-        this.valueWriter.trim();
+        const stringData = await this.strWriterAsync.getData();
+
+        await this.valueWriterAsync.trim();
+
+        await this.valueWriterAsync.push(stringData, true);
         
-        this.strWriter.deleteFile();
-
-        this.compWriter = this.valueWriter;
-
-        this.compWriter.trim();
+        await this.valueWriterAsync.trim();
         
-        if(this.useFile){
-            this.compWriter.renameFile(this.fileName);
-        }
+        await this.strWriterAsync.deleteFile();
 
-        this.DATA_SIZE = BigInt(this.compWriter.size);
+        this.compWriterAsync = this.valueWriterAsync;
+
+        this.DATA_SIZE = BigInt(this.compWriterAsync.size);
 
         if (this.Crc32) {
-            this.CRC();
+            await this.CRC();
         }
 
         if (this.Compressed) {
-            this.compress();
+            await this.compress();
 
-            this.DATA_SIZE = BigInt(this.compWriter.size);
+            this.DATA_SIZE = BigInt(this.compWriterAsync.size);
         }
 
         if (this.Encrypted) {
-            this.encrypt(this.EncryptionExcluded ? true : false, this.encryptionKey == 0 ? undefined : this.encryptionKey);
+            await this.encrypt(this.EncryptionExcluded ? true : false, this.encryptionKey == 0 ? undefined : this.encryptionKey);
         }
+
+        return;
     };
 
     /**
@@ -1295,12 +1309,12 @@ export class JPEncode<ContextType = undefined> extends JPBase {
      * @param {boolean?} EncryptionExcluded - remove key from file
      * @param {number?} Encryptionkey - 32 bit number
      */
-    private encrypt(EncryptionExcluded?: boolean, Encryptionkey?: number) {
+    private async encrypt(EncryptionExcluded?: boolean, Encryptionkey?: number) {
         this.Encrypted = 1;
 
         this.EncryptionExcluded = EncryptionExcluded ? 1 : 0;
 
-        if (this.compWriter == null) {
+        if (this.compWriterAsync == null) {
             this.throwError("Writer not created for encryption. " + this.fileName);
         }
 
@@ -1308,81 +1322,60 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
         this.encryptionKey = cypter.key;
 
-        const cryptBuffer = cypter.encrypt(this.compWriter.data as Buffer);
+        const srcData = await this.compWriterAsync.getData() as Buffer;
+        
+        const cryptBuffer = cypter.encrypt(srcData);
 
-        this.compWriter.gotoStart();
+        await this.compWriterAsync.close();
 
-        this.compWriter.overwrite(cryptBuffer, 0, true);
+        await this.compWriterAsync.open();
 
-        this.compWriter.trim();
+        await this.compWriterAsync.overwrite(cryptBuffer, 0, true);
 
-        this.compWriter.commit();
-
-        return this.compWriter.size;
- 
+        await this.compWriterAsync.trim();
+        
+        return this.compWriterAsync.size;
     };
 
     /**
      * Compresses data
      */
-    private compress() {
+    private async compress() {
         this.Compressed = 1;
 
-        if (this.compWriter == null) {
-            this.throwError(" Writer not created for compression. " + this.fileName);
+        if (this.compWriterAsync == null) {
+            this.throwError("Writer not created for compression. " + this.fileName);
         }
         
-        this.compWriter.gotoStart();
+        this.compWriterAsync.gotoStart();
 
-        const compBuffer = deflateBuffer(this.compWriter);
+        const compBuffer = await deflateBufferAsync(this.compWriterAsync);
 
-        this.compWriter.gotoStart();
+        await this.compWriterAsync.close();
 
-        this.compWriter.overwrite(compBuffer, 0, true);
+        await this.compWriterAsync.open();
 
-        this.compWriter.trim();
+        await this.compWriterAsync.overwrite(compBuffer, 0, true);
 
-        this.compWriter.commit();
+        await this.compWriterAsync.trim();
 
-        return this.compWriter.size;
+        return this.compWriterAsync.size;
     };
 
     /**
      * Creates CRC hash
      */
-    private CRC() {
+    private async CRC() {
         this.Crc32 = 1;
 
-        if (this.compWriter == null) {
+        if (this.compWriterAsync == null) {
             this.throwError(" Writer not created for CRC. " + this.fileName);
         }
 
-        if (!this.useFile) {
-            const data = this.compWriter.data as Buffer;
+        const data = await this.compWriterAsync.getData() as Buffer;
 
-            this.CRC32 = CRC32(data, 0) >>> 0;
+        this.CRC32 = CRC32(data, 0) >>> 0;
 
-            return;
-        } else {
-            let crc = 0;
-
-            const CHUNK_SIZE = 0x2000; // 8192 bytes
-
-            for (let position = 0; position <= this.compWriter.size;) {
-                this.compWriter.goto(position);
-
-                const buffer = this.compWriter.extract(Math.min(CHUNK_SIZE, this.compWriter.size - position)) as Buffer;
-
-                if (buffer.length == 0) break;
-
-                crc = CRC32(buffer, crc);
-
-                position += buffer.length;
-            }
-
-            this.CRC32 = crc >>> 0;
-
-            this.CRC32Hash = this.CRC32;
-        }
+        return;
     };
 }

@@ -1,10 +1,14 @@
-export { JPDecode, DecoderOptions } from './decode.js';
-export { JPEncode, EncoderOptions } from './encode.js';
+export { JPDecode } from './decode.js';
+export { JPEncode } from './encode.js';
+export { JPDecodeAsync } from './decodeAsync.js';
+export { JPEncodeAsync } from './encodeAsync.js';
 export { 
     endian, 
     JPType,
     JPExtType,
-    BigValue
+    BigValue,
+    DecoderOptions,
+    EncoderOptions
 } from './common.js';
 export {
     JPExtensionType,

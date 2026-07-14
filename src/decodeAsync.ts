@@ -1,11 +1,11 @@
-import fs from "fs";
+import fsp from "fs/promises";
 import { 
     Crypt, 
     CRC32 
 } from './hash.js';
 import { 
-    BiReader, 
-    BiWriter 
+    BiReaderAsync, 
+    BiWriterAsync 
 } from 'bireader';
 import { 
     JPExtensionCodec, 
@@ -13,16 +13,18 @@ import {
 } from "./ext.js";
 import {
     VERSION_NUMBER,
-    inflateFileSync,
-    inflateBuffer,
+    inflateFileAsync,
+    inflateBufferAsync,
     endian,
     bit,
     JPType,
     JPExtType,
     MAX_BUFFER,
-    JPBase,
+    JPBaseAsync,
     ensureBuffer,
-    DecoderOptions
+    DecoderOptions,
+    peakBytesSync,
+    fileExists
 } from './common.js';
 
 /**
@@ -314,7 +316,7 @@ class StackPool {
 /**
  * Create with `DecoderOptions`
  */
-export class JPDecode<ContextType = undefined> extends JPBase {
+export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
     private readonly extensionCodec: JPExtensionCodecType<ContextType>;
 
     private readonly context: ContextType;
@@ -396,12 +398,12 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         this.makeJSON = options?.makeJSON ? options.makeJSON : false;
     };
 
-    private clone(): JPDecode<ContextType> {
+    private clone(): JPDecodeAsync<ContextType> {
         // Because of slightly special argument `context`,
         // type assertion is needed.
         // @ts-ignore
-        const clone = new JPDecode({
-            extensionCodec: this.extensionCodec  as JPExtensionCodecType<ContextType>,
+        const clone = new JPDecodeAsync({
+            extensionCodec: this.extensionCodec as JPExtensionCodecType<ContextType>,
 
             context: this.context as ContextType,
 
@@ -415,7 +417,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         });
 
         clone.fileName = this.fileName;
-        // TODO may need more
+         // TODO may need more
         return clone;
     };
 
@@ -428,38 +430,38 @@ export class JPDecode<ContextType = undefined> extends JPBase {
      * 
      * @param bufferOrSourcePath - `Buffer` of the JamPack data or the file path to a JamPack file.
      */
-    public decode(bufferOrSourcePath: Buffer | ArrayLike<number> | Uint8Array<ArrayBufferLike> | ArrayBufferView | ArrayBufferLike | string): unknown {
+    public async decode(bufferOrSourcePath: Buffer | ArrayLike<number> | Uint8Array<ArrayBufferLike> | ArrayBufferView | ArrayBufferLike | string): Promise<unknown> {
         if (this.entered) {
             const instance = this.clone();
 
-            return instance.decode(bufferOrSourcePath);
+            return await instance.decode(bufferOrSourcePath);
         }
 
         if (typeof bufferOrSourcePath != "string") {
-            this.setBuffer(bufferOrSourcePath);
+            await this.setBuffer(bufferOrSourcePath);
         } else {
             this.fileName = bufferOrSourcePath;
 
-            this.checkFilePath(this.fileName);
+            await this.checkFilePath(this.fileName);
         }
 
         try {
             this.entered = true;
 
-            this.reinitializeState();
+            await this.reinitializeState();
 
-            if (this.valueReader == null) {
+            if (this.valueReaderAsync == null) {
                 this.throwError(" No value reader set. " + this.fileName);
             }
 
-            this.stringsList = this.createStringList() as string[];
+            this.stringsList = await this.createStringList() as string[];
 
-            const object = this.doDecode(this.valueReader);
+            const object = await this.doDecode(this.valueReaderAsync);
 
             if(this.tempCreated){
-                this.valueReader.deleteFile(); 
+                await this.valueReaderAsync.deleteFile(); 
             
-                this.valueReader.close();
+                await this.valueReaderAsync.close();
             }
 
             if(this.makeJSON && !this.validJSON){
@@ -476,26 +478,28 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         }
     };
 
-    private checkFilePath(filePath: string): void {
-        var biTest: BiReader<any, any> = new BiReader(filePath, {enforceBigInt: this.enforceBigInt});
+    private async checkFilePath(filePath: string): Promise<void> {
+        if(fileExists(filePath)){
+            const bytes = peakBytesSync(filePath, 40);
 
-        const testBuffer = biTest.extract(40);
+            var biTest = new BiReaderAsync(bytes, {enforceBigInt: this.enforceBigInt});
 
-        biTest.close();
+            await this.testHeader(biTest);
 
-        biTest = new BiReader(testBuffer, {enforceBigInt: this.enforceBigInt});
+            biTest.close();
 
-        this.testHeader(biTest);
-
-        biTest.close();
-
-        if(!this.useFile){
-            this.buffer = fs.readFileSync(filePath);
+            if(!this.LargeFile){
+                this.buffer = await fsp.readFile(filePath);
+            }
+        } else {
+            this.throwError(`Couldn't find file. ` + filePath);
         }
+
+        return;
     };
 
-    private testHeader(br: BiReader<any, any>) {
-        const MAGICS = br.uint16;
+    private async testHeader(br: BiReaderAsync<any, any>) {
+        const MAGICS = await br.uint16();
 
         if (!(MAGICS == 0x504A || MAGICS == 0x4A50)) {
             this.throwError(`File magics incorrect. Expecting 0x504A or 0x4A50, but got 0x${MAGICS.toString(16).padStart(4, "0")} ` + this.fileName);
@@ -505,37 +509,37 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             this.endian = "big";
         }
 
-        const V_MAJOR = br.uint8;
+        const V_MAJOR = await br.uint8();
 
-        const V_MINOR = br.uint8;
+        const V_MINOR = await br.uint8();
 
-        this.HEADER_SIZE = br.uint8;
+        this.HEADER_SIZE = await br.uint8();
 
-        this.LargeFile = br.bit1 as bit;
+        this.LargeFile = await br.bit1() as bit;
 
-        this.Compressed = br.bit1 as bit;
+        this.Compressed = await br.bit1() as bit;
 
-        this.Crc32 = br.bit1 as bit;
+        this.Crc32 = await br.bit1() as bit;
 
-        this.Encrypted = br.bit1 as bit;
+        this.Encrypted = await br.bit1() as bit;
 
-        this.EncryptionExcluded = br.bit1 as bit;
+        this.EncryptionExcluded = await br.bit1() as bit;
 
-        this.KeyStripped = br.bit1 as bit;
+        this.KeyStripped = await br.bit1() as bit;
 
-        br.bit1;  // FLAG6
+        await br.bit1();  // FLAG6
 
-        br.bit1;  // FLAG7
+        await br.bit1();  // FLAG7
 
-        br.uint8;  // RESV_6 FLAG8-15
+        await br.uint8();  // RESV_6 FLAG8-15
 
-        br.uint8;  // RESV_7 FLAG16-23
+        await br.uint8();  // RESV_7 FLAG16-23
 
-        this.VALUE_SIZE = br.uint64;
+        this.VALUE_SIZE = await br.uint64();
 
-        this.STR_SIZE = br.uint64;
+        this.STR_SIZE = await br.uint64();
 
-        this.DATA_SIZE = br.uint64;
+        this.DATA_SIZE = await br.uint64();
 
         const V_NUMBER = parseFloat(`${V_MAJOR}.${V_MINOR}`);
 
@@ -556,12 +560,12 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         }
         // extra headers
         if (this.Crc32) {
-            this.CRC32 = br.uint32;
+            this.CRC32 = await br.uint32();
             this.CRC32OnFile = this.CRC32;
         }
 
         if (this.Encrypted && !this.EncryptionExcluded) {
-            this.encryptionKey = br.uint32;
+            this.encryptionKey = await br.uint32();
         }
     };
 
@@ -570,37 +574,39 @@ export class JPDecode<ContextType = undefined> extends JPBase {
      * 
      * If a temp file is made, will have to delete after.
      */
-    private reinitializeState() {
+    private async reinitializeState() {
         if (this.useFile) {
-            if (this.fileReader != null) {
-                this.fileReader.close();
+            if (this.fileReaderAsync != null) {
+                await this.fileReaderAsync.close();
 
-                this.fileReader = null;
+                this.fileReaderAsync = null;
             }
 
-            this.compReader = new BiReader(this.fileName, {enforceBigInt: this.enforceBigInt});
+            const windowSize = this.LargeFile ? this.growthIncrement : 0;
 
-            this.compReader.endian = this.endian;
+            this.compReaderAsync = new BiReaderAsync(this.fileName, { windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
-            this.compReader.open();
+            this.compReaderAsync.endian = this.endian;
 
-            this.compReader.goto(this.HEADER_SIZE);
+            await this.compReaderAsync.open();
+
+            await this.compReaderAsync.goto(this.HEADER_SIZE);
 
             this.tempCreated = false;
 
             if (this.Encrypted) {
                 // make comp file without header
-                const compWriter = new BiWriter(this.fileName + ".comp", {enforceBigInt: this.enforceBigInt});
+                const compWriter = new BiWriterAsync(this.fileName + ".comp", { windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
                 compWriter.unrestrict();
 
                 compWriter.endian = this.endian;
 
-                compWriter.open();
+                await compWriter.open();
 
-                compWriter.overwrite(this.compReader.subarray(this.HEADER_SIZE, this.compReader.size - this.HEADER_SIZE), compWriter.offset, true);
+                await compWriter.overwrite(await this.compReaderAsync.subarray(this.HEADER_SIZE, this.compReaderAsync.size - this.HEADER_SIZE), compWriter.offset, true);
 
-                compWriter.trim();
+                await compWriter.trim();
 
                 this.tempCreated = true;
 
@@ -612,85 +618,85 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     finalSize = Number(this.VALUE_SIZE + this.STR_SIZE);
                 }
 
-                this.decrypt(compWriter, null, finalSize);
+                await this.decrypt(compWriter, null, finalSize);
 
-                compWriter.close();
+                await compWriter.close();
 
-                this.compReader = new BiReader(this.fileName + ".comp", {enforceBigInt: this.enforceBigInt});
+                this.compReaderAsync = new BiReaderAsync(this.fileName + ".comp", { windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
-                this.compReader.endian = this.endian;
+                this.compReaderAsync.endian = this.endian;
 
-                this.compReader.unrestrict();
+                this.compReaderAsync.unrestrict();
 
-                this.compReader.open();
+                this.compReaderAsync.open();
             }
 
             if (this.Compressed) {
                 // check if comp file was made
                 if (this.tempCreated) {
                     // compReader should be just the data
-                    const tempcompWriter = new BiWriter(this.fileName + ".comp.tmp", {enforceBigInt: this.enforceBigInt});
+                    const tempcompWriter = new BiWriterAsync(this.fileName + ".comp.tmp", { windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
                     tempcompWriter.endian = this.endian;
 
-                    tempcompWriter.open();
+                    await tempcompWriter.open();
 
-                    inflateFileSync(this.compReader, tempcompWriter);
+                    await inflateFileAsync(this.compReaderAsync, tempcompWriter);
 
-                    this.compReader.writeMode(true);
+                    await this.compReaderAsync.writeMode(true);
 
-                    this.compReader.gotoStart();
+                    this.compReaderAsync.gotoStart();
 
-                    this.compReader.overwrite(tempcompWriter.subarray(0, tempcompWriter.offset), this.compReader.offset, true);
+                    await this.compReaderAsync.overwrite(await tempcompWriter.subarray(0, tempcompWriter.offset) as Buffer, this.compReaderAsync.offset, true);
 
-                    this.compReader.trim();
+                    await this.compReaderAsync.trim();
 
-                    this.compReader.writeMode(false);
+                    await this.compReaderAsync.writeMode(false);
 
-                    tempcompWriter.deleteFile();
+                    await tempcompWriter.deleteFile();
                 } else {
                     // split off header
-                    const compWriter = new BiWriter(this.fileName + ".comp", {enforceBigInt: this.enforceBigInt});
+                    const compWriter = new BiWriterAsync(this.fileName + ".comp", { windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
                     compWriter.endian = this.endian;
 
-                    compWriter.open();
+                    await compWriter.open();
 
-                    compWriter.overwrite(this.compReader.subarray(this.HEADER_SIZE, this.compReader.size - this.HEADER_SIZE), compWriter.offset, true);
+                    await compWriter.overwrite(await this.compReaderAsync.subarray(this.HEADER_SIZE, this.compReaderAsync.size - this.HEADER_SIZE), compWriter.offset, true);
 
-                    compWriter.trim();
+                    await compWriter.trim();
 
-                    compWriter.close();
+                    await compWriter.close();
 
-                    const compReader = new BiReader(this.fileName + ".comp", {enforceBigInt: this.enforceBigInt});
+                    const compReader = new BiReaderAsync(this.fileName + ".comp", { windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
                     compReader.endian = this.endian;
 
                     compReader.unrestrict();
 
-                    const tempcompWriter = new BiWriter(this.fileName + ".comp.tmp", {enforceBigInt: this.enforceBigInt});
+                    const tempcompWriter = new BiWriterAsync(this.fileName + ".comp.tmp", {windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
                     tempcompWriter.endian = this.endian;
 
-                    tempcompWriter.open();
+                    await tempcompWriter.open();
 
                     this.tempCreated = true;
 
-                    inflateFileSync(compReader, tempcompWriter);
+                    await inflateFileAsync(compReader, tempcompWriter);
 
-                    compReader.writeMode(true);
+                    await compReader.writeMode(true);
 
                     compReader.gotoStart();
 
-                    compReader.overwrite(tempcompWriter.subarray(0,tempcompWriter.offset), compReader.offset, true);
+                    await compReader.overwrite(await tempcompWriter.subarray(0,tempcompWriter.offset) as Buffer, compReader.offset, true);
 
-                    compReader.trim();
+                    await compReader.trim();
 
-                    compReader.writeMode(false);
+                    await compReader.writeMode(false);
 
-                    tempcompWriter.deleteFile();
+                    await tempcompWriter.deleteFile();
 
-                    this.compReader = compReader;
+                    this.compReaderAsync = compReader;
                 }
             }
             if (this.Crc32) {
@@ -704,10 +710,10 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     start = 0;
                 }
 
-                this.compReader.goto(start);
+                await this.compReaderAsync.goto(start);
 
-                for (let position = start; position <= this.compReader.size;) {
-                    const buffer = this.compReader.subarray(position, Math.min(CHUNK_SIZE, this.compReader.size - position)) as Buffer;
+                for (let position = start; position <= this.compReaderAsync.size;) {
+                    const buffer = await this.compReaderAsync.subarray(position, Math.min(CHUNK_SIZE, this.compReaderAsync.size - position)) as Buffer;
 
                     if (buffer.length == 0) break;
 
@@ -726,67 +732,67 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             var totalSize = 0n;
 
             if (this.tempCreated) {
-                totalSize = BigInt(this.compReader.size);
+                totalSize = BigInt(this.compReaderAsync.size);
 
-                this.compReader.open();
+                await this.compReaderAsync.open();
 
-                this.valueReader = new BiReader(this.fileName + ".comp", {enforceBigInt: this.enforceBigInt});
+                this.valueReaderAsync = new BiReaderAsync(this.fileName + ".comp", { windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
-                this.strReader = new BiReader(this.fileName + ".comp", {enforceBigInt: this.enforceBigInt});
+                this.strReaderAsync = new BiReaderAsync(this.fileName + ".comp", { windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
-                this.valueReader.fd = this.compReader.fd;
+                this.valueReaderAsync.fd = this.compReaderAsync.fd;
 
-                this.valueReader.endian = this.compReader.endian;
+                this.valueReaderAsync.endian = this.compReaderAsync.endian;
 
-                this.valueReader.size = this.compReader.size;
+                this.valueReaderAsync.size = this.compReaderAsync.size;
 
-                this.valueReader.bitSize = this.compReader.bitSize;
+                this.valueReaderAsync.bitSize = this.compReaderAsync.bitSize;
 
-                this.valueReader.growthIncrement = this.compReader.growthIncrement;
+                this.valueReaderAsync.growthIncrement = this.compReaderAsync.growthIncrement;
 
-                this.strReader.fd = this.compReader.fd;
+                this.strReaderAsync.fd = this.compReaderAsync.fd;
 
-                this.strReader.endian = this.compReader.endian;
+                this.strReaderAsync.endian = this.compReaderAsync.endian;
 
-                this.strReader.size = this.compReader.size;
+                this.strReaderAsync.size = this.compReaderAsync.size;
 
-                this.strReader.bitSize = this.compReader.bitSize;
+                this.strReaderAsync.bitSize = this.compReaderAsync.bitSize;
 
-                this.strReader.growthIncrement = this.compReader.growthIncrement;
+                this.strReaderAsync.growthIncrement = this.compReaderAsync.growthIncrement;
                 
-                this.strReader.offset = Number(this.VALUE_SIZE);
+                await this.strReaderAsync.goto(Number(this.VALUE_SIZE));
             } else {
-                totalSize = BigInt(this.compReader.size - this.HEADER_SIZE);
+                totalSize = BigInt(this.compReaderAsync.size - this.HEADER_SIZE);
 
-                this.compReader.open();
+                await this.compReaderAsync.open();
 
-                this.valueReader = new BiReader(this.fileName, {enforceBigInt: this.enforceBigInt});
+                this.valueReaderAsync = new BiReaderAsync(this.fileName, {windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
-                this.strReader = new BiReader(this.fileName, {enforceBigInt: this.enforceBigInt});
+                this.strReaderAsync = new BiReaderAsync(this.fileName, {windowSize: windowSize, enforceBigInt: this.enforceBigInt});
 
-                this.valueReader.fd = this.compReader.fd;
+                this.valueReaderAsync.fd = this.compReaderAsync.fd;
 
-                this.valueReader.endian = this.compReader.endian;
+                this.valueReaderAsync.endian = this.compReaderAsync.endian;
 
-                this.valueReader.size = this.compReader.size;
+                this.valueReaderAsync.size = this.compReaderAsync.size;
 
-                this.valueReader.bitSize = this.compReader.bitSize;
+                this.valueReaderAsync.bitSize = this.compReaderAsync.bitSize;
 
-                this.valueReader.growthIncrement = this.compReader.growthIncrement;
+                this.valueReaderAsync.growthIncrement = this.compReaderAsync.growthIncrement;
 
-                this.valueReader.offset = this.HEADER_SIZE;
+                await this.valueReaderAsync.goto(this.HEADER_SIZE);
 
-                this.strReader.fd = this.compReader.fd;
+                this.strReaderAsync.fd = this.compReaderAsync.fd;
 
-                this.strReader.endian = this.compReader.endian;
+                this.strReaderAsync.endian = this.compReaderAsync.endian;
 
-                this.strReader.size = this.compReader.size;
+                this.strReaderAsync.size = this.compReaderAsync.size;
 
-                this.strReader.bitSize = this.compReader.bitSize;
+                this.strReaderAsync.bitSize = this.compReaderAsync.bitSize;
 
-                this.strReader.growthIncrement = this.compReader.growthIncrement;
+                this.strReaderAsync.growthIncrement = this.compReaderAsync.growthIncrement;
 
-                this.strReader.offset = this.HEADER_SIZE + Number(this.VALUE_SIZE);
+                await this.strReaderAsync.goto(this.HEADER_SIZE + Number(this.VALUE_SIZE));
             }
 
             if (this.VALUE_SIZE + this.STR_SIZE != totalSize) {
@@ -797,17 +803,17 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 this.throwError(" Buffer not set. " + this.fileName);
             }
 
-            this.fileReader = new BiReader(this.buffer, {enforceBigInt: this.enforceBigInt});
+            this.fileReaderAsync = new BiReaderAsync(this.buffer, { enforceBigInt: this.enforceBigInt});
 
-            this.fileReader.endian = this.endian;
+            this.fileReaderAsync.endian = this.endian;
 
-            this.fileReader.goto(this.HEADER_SIZE);
+            await this.fileReaderAsync.goto(this.HEADER_SIZE);
 
             var decomBuffer = this.buffer.subarray(this.HEADER_SIZE, this.buffer.length);
 
-            this.compReader = new BiReader(decomBuffer, {enforceBigInt: this.enforceBigInt});
+            this.compReaderAsync = new BiReaderAsync(decomBuffer, {enforceBigInt: this.enforceBigInt});
 
-            this.compReader.endian = this.endian;
+            this.compReaderAsync.endian = this.endian;
 
             if (this.Encrypted) {
                 var finalSize = Number(this.VALUE_SIZE + this.STR_SIZE);
@@ -816,21 +822,21 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     finalSize = Number(this.DATA_SIZE);
                 }
 
-                decomBuffer = this.decrypt(null, decomBuffer, finalSize);
+                decomBuffer = await this.decrypt(null, decomBuffer, finalSize);
 
-                this.compReader = new BiReader(decomBuffer, {enforceBigInt: this.enforceBigInt});
+                this.compReaderAsync = new BiReaderAsync(decomBuffer, {enforceBigInt: this.enforceBigInt});
 
-                this.compReader.endian = this.endian;
+                this.compReaderAsync.endian = this.endian;
             }
             if (this.Compressed) {
-                decomBuffer = inflateBuffer(this.compReader);
+                decomBuffer = await inflateBufferAsync(this.compReaderAsync);
 
-                this.compReader = new BiReader(decomBuffer, {enforceBigInt: this.enforceBigInt});
+                this.compReaderAsync = new BiReaderAsync(decomBuffer, {enforceBigInt: this.enforceBigInt});
 
-                this.compReader.endian = this.endian;
+                this.compReaderAsync.endian = this.endian;
             }
             if (this.Crc32) {
-                const data = this.compReader.data as Buffer;
+                const data = this.compReaderAsync.data as Buffer;
 
                 this.CRC32Hash = CRC32(data, 0) >>> 0;
 
@@ -839,39 +845,39 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 }
             }
 
-            if (this.VALUE_SIZE + this.STR_SIZE != BigInt(this.compReader.size)) {
-                this.addError(`File size DID NOT match headers, may be corrupt. Expecting ${this.VALUE_SIZE + this.STR_SIZE} but got ${this.compReader.size}. ` + this.fileName);
+            if (this.VALUE_SIZE + this.STR_SIZE != BigInt(this.compReaderAsync.size)) {
+                this.addError(`File size DID NOT match headers, may be corrupt. Expecting ${this.VALUE_SIZE + this.STR_SIZE} but got ${this.compReaderAsync.size}. ` + this.fileName);
             }
 
-            this.valueReader = new BiReader(this.compReader.extract(Number(this.VALUE_SIZE), true));
+            this.valueReaderAsync = new BiReaderAsync(await this.compReaderAsync.extract(Number(this.VALUE_SIZE), true));
+            console.log("valueReaderAsync", this.compReaderAsync.offset, await this.valueReaderAsync.get())
+            this.valueReaderAsync.endian = this.endian;
 
-            this.valueReader.endian = this.endian;
-
-            this.strReader = new BiReader(this.compReader.extract(Number(this.STR_SIZE), true));
-
-            this.strReader.endian = this.endian;
+            this.strReaderAsync = new BiReaderAsync(await this.compReaderAsync.extract(Number(this.STR_SIZE), true));
+            console.log("strReaderAsync", this.compReaderAsync.offset,await this.strReaderAsync.get())
+            this.strReaderAsync.endian = this.endian;
         }
     };
 
-    private setBuffer(buffer: Buffer | ArrayLike<number> | ArrayBufferView | ArrayBufferLike): void {
+    private async setBuffer(buffer: Buffer | ArrayLike<number> | ArrayBufferView | ArrayBufferLike): Promise<void> {
         this.buffer = ensureBuffer(buffer);
 
-        this.fileReader = new BiReader(this.buffer, {enforceBigInt: this.enforceBigInt});
+        this.fileReaderAsync = new BiReaderAsync(this.buffer, {enforceBigInt: this.enforceBigInt});
 
-        this.testHeader(this.fileReader);
+        await this.testHeader(this.fileReaderAsync);
 
-        this.fileReader.close();
+        await this.fileReaderAsync.close();
 
-        this.fileReader = null;
+        this.fileReaderAsync = null;
     };
 
-    private createStringList() {
-        if (this.strReader == null) {
+    private async createStringList() {
+        if (this.strReaderAsync == null) {
             this.throwError(" string reader not set. " + this.fileName);
         }
 
         DECODE: while (true) {
-            const headByte = this.strReader.ubyte;
+            const headByte = await this.strReaderAsync.ubyte();
 
             let object: unknown;
 
@@ -883,11 +889,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 if (headByte <= JPType.ARRAY_15) {
                     size = headByte - JPType.ARRAY_0;
                 } else if (headByte === JPType.ARRAY8) {
-                    size = this.strReader.ubyte;
+                    size = await this.strReaderAsync.ubyte();
                 } else if (headByte === JPType.ARRAY16) {
-                    size = this.strReader.uint16;
+                    size = await this.strReaderAsync.uint16();
                 } else if (headByte === JPType.ARRAY32) {
-                    size = this.strReader.uint32;
+                    size = await this.strReaderAsync.uint32();
                 }
 
                 if (size !== 0) {
@@ -905,14 +911,14 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 if (headByte <= JPType.STR_15) {
                     size = headByte - JPType.STR_0;
                 } else if (headByte === JPType.STR8) {
-                    size = this.strReader.ubyte;
+                    size = await this.strReaderAsync.ubyte();
                 } else if (headByte === JPType.STR16) {
-                    size = this.strReader.uint16;
+                    size = await this.strReaderAsync.uint16();
                 } else if (headByte === JPType.STR32) {
-                    size = this.strReader.uint32;
+                    size = await this.strReaderAsync.uint32();
                 }
 
-                object = this.strReader.string({ length: size });
+                object = await this.strReaderAsync.string({ length: size });
             } else {
                 this.throwError(`Invalid data in string area. 0x${headByte.toString(16).padStart(2, "0")} ` + this.fileName);
             }
@@ -947,34 +953,69 @@ export class JPDecode<ContextType = undefined> extends JPBase {
     /**
      * Runs a raw decode on the passed value buffer as `Buffer` or `BiReader`. Return data wherever it ends based on the start value.
      * 
+     * NOTE: This function is for extention use, not direct use. Use `decodeAsync` instead.
+     * 
+     * @param bufferOrReader - `Buffer` or `BiReader`
+     * @returns Decoded data
+     */
+    async doDecodeAsync(bufferOrReader: Buffer | BiReaderAsync<any, any>): Promise<unknown>{
+        var reader = bufferOrReader;
+        
+        if(reader instanceof Buffer){
+            const windowSize = this.LargeFile ? this.growthIncrement : 0;
+
+            reader = new BiReaderAsync(reader, { windowSize: windowSize, enforceBigInt: this.enforceBigInt});
+
+            reader.endian = this.endian;
+        }
+
+        if(!(reader instanceof BiReaderAsync) || reader == null){
+            this.throwError(" Value reader not set. " + this.fileName);
+        }
+
+        if(this.strReaderAsync == null){
+            this.throwError(" String reader not set. " + this.fileName);
+        }
+
+        try{
+            return await this.doDecode(reader);
+        } catch (err){
+            // @ts-ignore
+            throw new Error(err);
+        }
+    };
+
+    /**
+     * Runs a raw decode on the passed value buffer as `Buffer` or `BiReader`. Return data wherever it ends based on the start value.
+     * 
      * NOTE: This function is for extention use, not direct use. Use `decode` instead.
      * 
      * @param bufferOrReader - `Buffer` or `BiReader`
      * @returns Decoded data
      */
-    doDecode(bufferOrReader: Buffer | BiReader<any, any>): unknown {
+    async doDecode(bufferOrReader: Buffer | BiReaderAsync<any, any>): Promise<unknown> {
         var reader = bufferOrReader;
 
         if(reader instanceof Buffer){
-            reader = new BiReader(reader, {enforceBigInt: this.enforceBigInt});
+            reader = new BiReaderAsync(reader, {enforceBigInt: this.enforceBigInt});
 
             reader.endian = this.endian;
         }
 
-        if(!(reader instanceof BiReader) || reader == null){
+        if(!(reader instanceof BiReaderAsync) || reader == null){
             this.throwError(" Value reader not set. " + this.fileName);
         }
 
-        if(this.strReader == null){
+        if(this.strReaderAsync == null){
             this.throwError(" String reader not set. " + this.fileName);
         }
 
-        reader = reader as BiReader<any, any>;
+        reader = reader as BiReaderAsync<any, any>;
     
         let object: unknown;
 
         DECODE: while (true) {
-            const headByte: number = reader.ubyte;
+            const headByte: number = await reader.ubyte();
             
             if (headByte < JPType.OBJECT_0) {
                 // positive fixint 0x00 - 0x7f
@@ -1053,11 +1094,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 var size = 0;
 
                 if (headByte === JPType.OBJECT8) {
-                    size = reader.ubyte;
+                    size = await reader.ubyte();
                 } else if (headByte === JPType.OBJECT16) {
-                    size = reader.uint16;
+                    size = await reader.uint16();
                 } else if (headByte === JPType.OBJECT32) {
-                    size = reader.uint32;
+                    size = await reader.uint32();
                 }
 
                 if (size !== 0) {
@@ -1068,17 +1109,17 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     object = {};
                 }
             } else if (headByte === JPType.FLOAT32) {
-                object = reader.float;
+                object = await reader.float();
             } else if (headByte === JPType.FLOAT64) {
-                object = reader.doublefloat;
+                object = await reader.doublefloat();
             } else if (headByte === JPType.UINT_8) {
-                object = reader.uint8;
+                object = await reader.uint8();
             } else if (headByte === JPType.UINT_16) {
-                object = reader.uint16;
+                object = await reader.uint16();
             } else if (headByte === JPType.UINT_32) {
-                object = reader.uint32;
+                object = await reader.uint32();
             } else if (headByte === JPType.UINT_64) {
-                object = reader.uint64; 
+                object = await reader.uint64(); 
                 if(this.enforceBigInt){
                     object = BigInt(object as number);
                 }
@@ -1086,13 +1127,13 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     this.validJSON = false;
                 }
             } else if (headByte === JPType.INT_8) {
-                object = reader.int8;
+                object = await reader.int8();
             } else if (headByte === JPType.INT_16) {
-                object = reader.int16;
+                object = await reader.int16();
             } else if (headByte === JPType.INT_32) {
-                object = reader.int32;
+                object = await reader.int32();
             } else if (headByte === JPType.INT_64) {
-                object = reader.int64; 
+                object = await reader.int64(); 
                 if(this.enforceBigInt){
                     object = BigInt(object as number);
                 }
@@ -1104,11 +1145,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 var index = 0;
 
                 if (headByte === JPType.KEY8) {
-                    index = reader.ubyte;
+                    index = await reader.ubyte();
                 } else if (headByte === JPType.KEY16) {
-                    index = reader.uint16;
+                    index = await reader.uint16();
                 } else if (headByte === JPType.KEY32) {
-                    index = reader.uint32;
+                    index = await reader.uint32();
                 }
 
                 if (!this.keysArray[index]) {
@@ -1121,11 +1162,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 var index = 0;
 
                 if (headByte === JPType.STR8) {
-                    index = reader.ubyte;
+                    index = await reader.ubyte();
                 } else if (headByte === JPType.STR16) {
-                    index = reader.uint16;
+                    index = await reader.uint16();
                 } else if (headByte === JPType.STR32) {
-                    index = reader.uint32;
+                    index = await reader.uint32();
                 }
 
                 if (this.stringsList[index] === undefined) {
@@ -1138,11 +1179,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 var size = 0;
 
                 if (headByte === JPType.ARRAY8) {
-                    size = reader.ubyte;
+                    size = await reader.ubyte();
                 } else if (headByte === JPType.ARRAY16) {
-                    size = reader.uint16;
+                    size = await reader.uint16();
                 } else if (headByte === JPType.ARRAY32) {
-                    size = reader.uint32;
+                    size = await reader.uint32();
                 }
 
                 if (size !== 0) {
@@ -1158,14 +1199,14 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 var size = 0;
 
                 if (headByte === JPType.EXT8) {
-                    size = reader.ubyte;
+                    size = await reader.ubyte();
                 } else if (headByte === JPType.EXT16) {
-                    size = reader.uint16;
+                    size = await reader.uint16();
                 } else if (headByte === JPType.EXT32) {
-                    size = reader.uint32;
+                    size = await reader.uint32();
                 }
 
-                const type = reader.ubyte;
+                const type = await reader.ubyte();
 
                 if(type == JPExtType.Maps){
                     this.validJSON = false;
@@ -1186,7 +1227,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                         object = new Set();
                     }
                 } else {
-                    object = this.decodeExtension(reader, size, type);
+                    object = await this.decodeExtension(reader, size, type);
                 }
             } else if (headByte > JPType.EXT32) {
                 // negative fixint
@@ -1300,8 +1341,8 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         this.stack.pushSetState(size);
     };
 
-    private readString(headByte: number) {
-        if (this.valueReader == null) {
+    private async readString(headByte: number) {
+        if (this.valueReaderAsync == null) {
             this.throwError(" Value reader not set. " + this.fileName);
         }
 
@@ -1315,11 +1356,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             if (headByte <= JPType.STR_15) {
                 index = headByte - JPType.STR_0;
             } else if (headByte === JPType.STR8) {
-                index = this.valueReader.ubyte;
+                index = await this.valueReaderAsync.ubyte();
             } else if (headByte === JPType.STR16) {
-                index = this.valueReader.uint16;
+                index = await this.valueReaderAsync.uint16();
             } else if (headByte === JPType.STR32) {
-                index = this.valueReader.uint32;
+                index = await this.valueReaderAsync.uint32();
             }
             if (this.stringsList[index] === undefined) {
                 this.addError(`Did not find string value for index ` + index + " in file " + this.fileName);
@@ -1331,18 +1372,18 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         return value;
     };
 
-    private decodeExtension(valueReader: BiReader<any, any>, size: number, extType :number): unknown {
+    private async decodeExtension(valueReader: BiReaderAsync<any, any>, size: number, extType :number): Promise<unknown> {
         let retValue:unknown, data: Buffer, holder: Uint8Array;
 
         switch (extType) {
             case JPExtType.Symbol:
                 this.validJSON = false;
                 // bool and string
-                const global = valueReader.ubyte == JPType.BOOL_TRUE ? true : false;
+                const global = await valueReader.ubyte() == JPType.BOOL_TRUE ? true : false;
 
-                var headByte = valueReader.ubyte;
+                var headByte = await valueReader.ubyte();
 
-                const key = this.readString(headByte);
+                const key = await this.readString(headByte);
 
                 retValue = global ? Symbol.for(key) : Symbol(key);
 
@@ -1352,9 +1393,9 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             case JPExtType.RegEx:
                 this.validJSON = false;
                 // two strings
-                const source = this.readString(valueReader.ubyte);
+                const source = await this.readString(await valueReader.ubyte());
 
-                const flags = this.readString(valueReader.ubyte);
+                const flags = await this.readString(await valueReader.ubyte());
 
                 retValue = new RegExp(source, flags);
 
@@ -1368,7 +1409,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 // handled before
                 break;
             case JPExtType.BigUint64Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
 
@@ -1376,7 +1417,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.BigInt64Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
 
@@ -1384,7 +1425,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.Float64Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
 
@@ -1392,7 +1433,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.Float32Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
 
@@ -1400,7 +1441,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.Float16Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
                 // @ts-ignore
@@ -1411,7 +1452,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.Int32Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
 
@@ -1419,7 +1460,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.Uint32Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
 
@@ -1427,7 +1468,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.Uint16Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
 
@@ -1435,7 +1476,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.Int16Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
 
@@ -1443,7 +1484,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.Int8Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
 
@@ -1451,13 +1492,13 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.Uint8Array:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 retValue = new Uint8Array(data);
 
                 break;
             case JPExtType.Uint8ClampedArray:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
                 holder = new Uint8Array(data);
 
@@ -1465,22 +1506,22 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 break;
             case JPExtType.Buffer:
-                retValue = valueReader.extract(size, true);
+                retValue = await valueReader.extract(size, true) as Buffer;
 
                 retValue = Buffer.from(retValue as Buffer);
 
                 break;
             case JPExtType.Date:
-                data = valueReader.extract(size, true) as Buffer;
+                data = await valueReader.extract(size, true) as Buffer;
 
-                const br = new BiReader(data, {enforceBigInt: this.enforceBigInt});
+                const br = new BiReaderAsync(data, {enforceBigInt: this.enforceBigInt});
 
                 br.endian = this.endian;
 
                 switch (br.size) {
                     case 4: {
                         // timestamp 32 = { sec32 }
-                        const sec = br.uint32;
+                        const sec = await br.uint32();
 
                         const nsec = 0;
 
@@ -1490,9 +1531,9 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     }
                     case 8: {
                         // timestamp 64 = { nsec30, sec34 }
-                        const nsec30AndSecHigh2 = br.uint32;
+                        const nsec30AndSecHigh2 = await br.uint32();
 
-                        const secLow32 = br.uint32;
+                        const secLow32 = await br.uint32();
 
                         const sec = (nsec30AndSecHigh2 & 0x3) * 0x100000000 + secLow32;
 
@@ -1504,9 +1545,9 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     }
                     case 12: {
                         // timestamp 96 = { nsec32 (unsigned), sec64 (signed) }
-                        const nsec = br.uint32;
+                        const nsec = await br.uint32();
                         
-                        const sec = Number(br.int64);
+                        const sec = Number(await br.int64());
 
                         retValue = new Date(sec * 1e3 + nsec / 1e6);
                     }
@@ -1519,23 +1560,23 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         }
 
         if(retValue == undefined){
-            const data = valueReader.extract(size, true) as Buffer;
+            const data = await valueReader.extract(size, true) as Buffer;
 
-            const br = new BiReader(data, {enforceBigInt: this.enforceBigInt});
+            const br = new BiReaderAsync(data, {enforceBigInt: this.enforceBigInt});
 
             br.endian = this.endian;
 
-            retValue = this.extensionCodec.decode(br, this, extType, this.context);
+            retValue = await this.extensionCodec.decodeAsync(br, this, extType, this.context);
         }
 
         return retValue;
     };
 
-    ////////////////////////
-    // #region FINALIZE
-    ////////////////////////
+    //////////////
+    // FINALIZE //
+    //////////////
 
-    private decrypt(br?: BiWriter<any, any>, buffer?:Buffer, finalSize?: number) {
+    private async decrypt(br?: BiWriterAsync<any, any>, buffer?:Buffer, finalSize?: number) {
         const cypter = new Crypt(this.encryptionKey);
 
         if (!this.useFile) {
@@ -1553,7 +1594,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         } else {
             const CHUNK_SIZE = 16;
             
-            br.open();
+            await br.open();
 
             br.gotoStart();
 
@@ -1572,7 +1613,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             for (let index = 0; index < amount; index++) {
                 bytesRead = Math.min(CHUNK_SIZE, bytesToProcess);
 
-                buff = br.subarray(bytesStart, bytesRead) as Buffer;
+                buff = await br.subarray(bytesStart, bytesRead) as Buffer;
 
                 if(index == (amount - 1)) {
                     data = cypter.decrypt_block(buff, true);
@@ -1581,7 +1622,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                 }
 
                 if(data.length != 0){
-                    br.overwrite(data, null, true);
+                    await br.overwrite(data, br.offset, true);
                 }
 
                 bytesStart += buff.length;
@@ -1592,10 +1633,10 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             data = cypter.decrypt_final();
     
             if(data.length != 0){
-                br.overwrite(data, null, true);
+                await br.overwrite(data, br.offset, true);
             }
 
-            br.trim();
+            await br.trim();
 
             if(br.size != finalSize){
                 this.addError(`Decrypted buffer size of ${br.size} was expected size of ${finalSize} in file ` + this.fileName);

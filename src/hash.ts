@@ -136,6 +136,7 @@ export class Crypt {
 
     private fallbackCipher(){
         var crypt:  AES | ARIA | CAMELLIA;
+
         switch (this.hash){
             case "aes-256-cbc":
                 crypt = new AES();
@@ -149,6 +150,7 @@ export class Crypt {
             default:
                 throw new Error("Did not find cipher.");
         }
+
         crypt.set_key(this.keyBuff);
 
         crypt.set_iv(this.ivBuffer);
@@ -157,9 +159,11 @@ export class Crypt {
     };
 
     encrypt(data: Buffer) {
+        
         if(this.useFallback){
             if(this.fallback == null) this.fallbackCipher();
-            return this.fallback.encrypt(data);
+
+            return this.fallback?.encrypt(data);
         }
 
         if (this.cipher == null) {
@@ -169,10 +173,11 @@ export class Crypt {
         return Buffer.concat([this.cipher.update(data), this.cipher.final()]);
     };
 
-    decrypt(data: Buffer) {
+    decrypt(data: Buffer) { 
         if(this.useFallback){
             if(this.fallback == null) this.fallbackCipher();
-            return this.fallback.decrypt(data);
+
+            return this.fallback?.decrypt(data);
         }
 
         if (this.decipher == null) {
@@ -185,7 +190,8 @@ export class Crypt {
     encrypt_block(data: Buffer, final?: boolean) {
         if(this.useFallback){
             if(this.fallback == null) this.fallbackCipher();
-            return this.fallback.encrypt_block(data, final);
+
+            return this.fallback?.encrypt_block(data, final);
         }
         if (this.cipher == null) {
             this.cipher = crypto.createCipheriv(this.hash, this.keyBuff, this.ivBuffer);
@@ -197,7 +203,8 @@ export class Crypt {
     decrypt_block(data: Buffer, final?: boolean) {
         if(this.useFallback){
             if(this.fallback == null) this.fallbackCipher();
-            return this.fallback.decrypt_block(data, final);
+
+            return this.fallback?.decrypt_block(data, final);
         }
 
         if (this.decipher == null) {
@@ -592,6 +599,7 @@ class AES {
         }        
         var return_buffer = block_out;
         if (this.iv_set == true) {
+            // @ts-ignore
             return_buffer = xor(block_out, this.iv);
         }
         if(last_block){
@@ -777,9 +785,9 @@ export class ARIA {
     ek = new Uint32Array(68); // Encryption round keys - Max size for 256-bit key (17 rounds * 4)
     dk = new Uint32Array(68) // Decryption round keys
     key_set = false;
-    iv: Buffer;
+    iv: Buffer | undefined;
     iv_set = false;
-    previous_block:Buffer;
+    previous_block:Buffer | undefined;
 
     constructor() {
     };
@@ -1021,7 +1029,7 @@ export class ARIA {
         if(last_block){
             input = padd_block(input);
         }
-        if (this.iv_set == true) {
+        if (this.iv_set == true && this.iv) {
             input = xor(input, this.iv);
         }
 
@@ -1130,7 +1138,7 @@ export class ARIA {
         this.store32BE(q[2], output, 8);
         this.store32BE(q[3], output, 12);
 
-        if (this.iv_set == true) {
+        if (this.iv_set == true && this.iv) {
             xor(output, this.iv);
         }
 

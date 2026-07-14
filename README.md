@@ -38,6 +38,7 @@ const object = {
   setExt: new Set([50, 60, 70]),
   symbolExt: Symbol("symbol"),
   regexExt: /(regex)/g,
+  bufferExt: Buffer.from([1, 2, 3]);
   uint8arrayExt: new Uint8Array([1, 2, 3]),
   dateExt: new Date()
 };
@@ -46,9 +47,28 @@ const encoder = new JPEncode();
 
 const encoded: Buffer = encoder.encode(object);
 
-const decoder = new JPDecode();
+const decoder: new JPDecode({makeJSON: true});
 
-const decoded = decoder.decode(encoded);
+const object = decoder.decode(encoded);
+
+console.log(object);
+// {
+//   null: null,
+//   undefined: 'undefined',
+//   integer: 1,
+//   float: 3.141592653589793,
+//   bigint: '72057594037927936',
+//   string: 'Hello, world!',
+//   array: [ 10, 20, 30 ],
+//   object: { foo: 'bar' },
+//   mapExt: [ [ 'key1', 'data1' ], [ 'key2', 'data2' ] ],
+//   setExt: [ 50, 60, 70 ],
+//   symbolExt: { symbolGlobal: false, symbolKey: 'symbol' },
+//   regexExt: { regexSrc: '(regex)', regexFlags: 'g' },
+//   bufferExt: { type: 'Buffer', data: [ 1, 2, 3 ] },
+//   uint8arrayExt: { '0': 1, '1': 2, '2': 3 },
+//   dateExt: '2025-07-10T02:17:53.721Z'
+// }
 ```
 
 ## Table of Contents
@@ -59,10 +79,12 @@ const decoded = decoder.decode(encoded);
 - [Install](#install)
 - [API](#api)
   - [`new JPEncode(EncoderOptions?)`](#new-jpencodeencoderoptions)
+  - [`new JPEncodeAsync(EncoderOptions?)`](#new-jpencodeasyncencoderoptions)
     - [`EncoderOptions`](#encoderoptions)
     - [Class `JPEncode` functions](#class-jpencode-functions)
     - [Class `JPEncode` objects](#class-jpencode-objects)
   - [`new JPDecode(DecoderOptions?)`](#new-jpdecodedecoderoptions)
+  - [`new JPDecodeAsync(DecoderOptions?)`](#new-jpdecodeasyncdecoderoptions)
     - [`DecoderOptions`](#DecoderOptions)
     - [Class `JPDecode` functions](#class-jpdecode-functions)
     - [Class `JPDecode` objects](#class-jpdecode-objects)
@@ -106,46 +128,67 @@ encoder.encode(data, "./foo.jpk"); // Saves the encrypted Buffer directly to fil
 const encryptionKey = encoder.encryptionKey; // Key for later decryption.
 ```
 
+### `new JPEncodeAsync(EncoderOptions?)`
+
+Creates a new `JPEncodeAsync` class with set `EncoderOptions`. You can then encode your data with `await encoder.encode(data)` into a single JamPak-encoded `Buffer`. It throws errors if `data` is, or includes, a non-serializable object such as a `function` or other types not added to the extensions.
+
+Alternatively you can include a `filePath` string as a second argument and write the file out directly.
+
+For example:
+
+```typescript
+import { JPEncodeAsync } from "jampak";
+
+const encoder: new JPEncodeAsync({encrypt:true, stripEncryptKey:true});
+
+const data = { foo: "bar" };
+
+await encoder.encode(data, "./foo.jpk"); // Saves the encrypted Buffer directly to file
+
+const encryptionKey = encoder.encryptionKey; // Key for later decryption.
+```
+
 #### `EncoderOptions`
 
-| Name                | Type             | Default                       | Desc |
-| ------------------- | ---------------- | ----------------------------- | ---  |
+| Name                | Type               | Default                       | Desc |
+| ------------------- | ----------------   | ----------------------------- | ---  |
 | extensionCodec      | JPExtensionCodec   | `ExtensionCodec.defaultCodec` | User added extension types, see [Extension Types](#extension-types). |
-| endian              | string           | "little"                      | Change the endianess of the Buffer writing. |
-| encrypt             | boolean          | false                         | If the file should be encrypted. |
-| encryptionKey       | number           | undefined                     | If you want to set your own 32 bit key. |
-| stripEncryptKey     | boolean          | false                         | If the encryption key is not saved within the file. After encoding  you must save the `encryptionKey` from the class it was created from. |
-| CRC32               | boolean          | false                         | Add a CRC32 check to the file (recommanded when encrypting). |
-| compress            | boolean          | false                         | Compress the file's data. |
-| stripKeys           | boolean          | false                         | Remove all keys from the save file. Must save the `keysArray` from the class it was created from. |
+| endian              | string             | "little"                      | Change the endianess of the Buffer writing. |
+| encrypt             | boolean            | false                         | If the file should be encrypted. |
+| encryptionKey       | number             | undefined                     | If you want to set your own 32 bit key. |
+| stripEncryptKey     | boolean            | false                         | If the encryption key is not saved within the file. After encoding  you must save the `encryptionKey` from the class it was created from. |
+| CRC32               | boolean            | false                         | Add a CRC32 check to the file (recommanded when encrypting). |
+| compress            | boolean            | false                         | Compress the file's data. |
+| stripKeys           | boolean            | false                         | Remove all keys from the save file. Must save the `keysArray` from the class it was created from. |
+| growthIncrement     | number             | 0x1000000                     | Byte amount to start and increase when a Buffer size is needed. |
 
 #### Class `JPEncode` functions
 
 Note: Outside of the basic `encode`, these functions should only be used within a user created [Extension Type](#extension-types).
 
-| Functions        | Type                                            | Desc |
-| ------------------------- | -------------------------------------------------- | ---  |
-| encode(object, filePath?) | `function (uknown, string?) : Buffer`      | The basic function that creates the JamPak Buffer. If a `filePath` is supplied, it writes the file directly out. |
-|encodeObject(valueWriter, object, depth?)|`function (BiWriter \| BiWriterStream, Record<string, unknown>, number?): number`| Encodes a `Object` to the passed `BiWriter`'s buffer. Returns the number of bytes written. |
-|encodeArray(valueWriter, array, depth?) |`function (BiWriter \| BiWriterStream, Array<unknown>, number?): number`| [Extension](#extension-types) function use only. Encodes a `Array` to the passed `BiWriter`'s buffer. Returns the number of bytes written.|
-|encodeString(valueWriter, string, isKey?)|`function (BiWriter \| BiWriterStream, string,  boolean?): number`| [Extension](#extension-types) function use only. Encodes a `string` to the string section of the current file and writes the index to the passed `BiWriter`'s buffer. Returns the number of bytes written to the buffer. |
-|encodeNull(valueWriter) |`function ( BiWriter \| BiWriterStream): number`| [Extension](#extension-types) function use only. Encodes a `null` to the passed `BiWriter`'s buffer. Returns the number of bytes written. |
-|encodeUndefined(valueWriter) |`function (BiWriter \| BiWriterStream): number`| [Extension](#extension-types) function use only. Encodes a `undefined` to the passed `BiWriter`'s buffer. Returns the number of bytes written.|
-|encodeBoolean(valueWriter)|`function (BiWriter \| BiWriterStream): number`| [Extension](#extension-types) function use only. Encodes a `true` or `false` to the passed `BiWriter`'s buffer. Returns the number of bytes written.|
-|encodeFinished(valueWriter)|`function (BiWriter \| BiWriterStream): number`| [Extension](#extension-types) function use only. Encodes a "finished" byte to the passed `BiWriter`'s buffer. Will end all looping when the reader hits this byte. Returns the number of bytes written. |
-|encodeListEnd(valueWriter)|`function (BiWriter \| BiWriterStream): number`| [Extension](#extension-types) function use only. Encodes a "list end" byte to the passed `BiWriter`'s buffer, useful when pulling loose data and don't want to break the whole loop. Returns the number of bytes written. | 
-|encodeNumber(valueWriter, number)|`function (BiWriter \| BiWriterStream, number): number`| [Extension](#extension-types) function use only. Encodes a `number` to the passed `BiWriter`'s buffer. Computes the right byte size base on value.  Returns the number of bytes written.|
-|encodeBigInt64(valueWriter, bigint)|`function (BiWriter \| BiWriterStream, bigint): number` | [Extension](#extension-types) function use only. Encodes a `bigint` to the passed `BiWriter`'s buffer. Always written as a 64 bit value.|
+| Functions                                 | Type                                                                             | Desc |
+| -------------------------                 | --------------------------------------------------                               | ---  |
+| encode(object, filePath?)                 | `function (uknown, string?) : Buffer`                                            | The basic function that creates the JamPak Buffer. If a `filePath` is supplied, it writes the file directly out. |
+| encodeObject(valueWriter, object, depth?) | `function (BiWriter \| BiWriterAsync, Record<string, unknown>, number?): number` | Encodes a `Object` to the passed `BiWriter` / `BiWriterAsync`'s buffer. Returns the number of bytes written. |
+| encodeArray(valueWriter, array, depth?)   | `function (BiWriter \| BiWriterAsync, Array<unknown>, number?): number`          | [Extension](#extension-types) function use only. Encodes a `Array` to the passed `BiWriter` / `BiWriterAsync`'s buffer. Returns the number of bytes written.|
+| encodeString(valueWriter, string, isKey?) | `function (BiWriter \| BiWriterAsync, string,  boolean?): number`                | [Extension](#extension-types) function use only. Encodes a `string` to the string section of the current file and writes the index to the passed `BiWriter` / `BiWriterAsync`'s buffer. Returns the number of bytes written to the buffer. |
+| encodeNull(valueWriter)                   | `function (BiWriter \| BiWriterAsync): number`                                   | [Extension](#extension-types) function use only. Encodes a `null` to the passed `BiWriter` / `BiWriterAsync`'s buffer. Returns the number of bytes written. |
+| encodeUndefined(valueWriter)              | `function (BiWriter \| BiWriterAsync): number`                                   | [Extension](#extension-types) function use only. Encodes a `undefined` to the passed `BiWriter` / `BiWriterAsync`'s buffer. Returns the number of bytes written.|
+| encodeBoolean(valueWriter)                | `function (BiWriter \| BiWriterAsync): number`                                   | [Extension](#extension-types) function use only. Encodes a `true` or `false` to the passed `BiWriter` / `BiWriterAsync`'s buffer. Returns the number of bytes written.|
+| encodeFinished(valueWriter)               | `function (BiWriter \| BiWriterAsync): number`                                   | [Extension](#extension-types) function use only. Encodes a "finished" byte to the passed `BiWriter` / `BiWriterAsync`'s buffer. Will end all looping when the reader hits this byte. Returns the number of bytes written. |
+| encodeListEnd(valueWriter)                | `function (BiWriter \| BiWriterAsync): number`                                   | [Extension](#extension-types) function use only. Encodes a "list end" byte to the passed `BiWriter` / `BiWriterAsync`'s buffer, useful when pulling loose data and don't want to break the whole loop. Returns the number of bytes written. | 
+| encodeNumber(valueWriter, number)         | `function (BiWriter \| BiWriterAsync, number): number`                           | [Extension](#extension-types) function use only. Encodes a `number` to the passed `BiWriter` / `BiWriterAsync`'s buffer. Computes the right byte size base on value.  Returns the number of bytes written.|
+| encodeBigInt64(valueWriter, bigint)       | `function (BiWriter \| BiWriterAsync, bigint): number`                           | [Extension](#extension-types) function use only. Encodes a `bigint` to the passed `BiWriter` / `BiWriterAsync`'s buffer. Always written as a 64 bit value.|
 
 #### Class `JPEncode` objects
 
 After `encode` has run.
 
 | Name                      | Type                                       | Desc |
-------------------------- | ------------------------------------------ | -------------------------------------------------- |
+-------------------------   | ------------------------------------------ | -------------------------------------------------- |
 | encryptionKey             | number                                     | The encryption key used in the file. Must be saved if `stripEncryptKey` was used. |
 | keysArray                 | string[]                                   | The keys for the object data. Must be saved if `stripKeys` was used. |
-| CRC32Hash | number | The computed CRC32 hash if enabled in options |
+| CRC32Hash                 | number                                     | The computed CRC32 hash if enabled in options |
 
 ### `new JPDecode(DecoderOptions?)`
 
@@ -163,90 +206,55 @@ const object = decoder.decode('./foo.jpk');
 console.log(object);
 ```
 
+### `new JPDecodeAsync(DecoderOptions?)`
+
+Creates a new `JPDecodeAsync` class with set `DecoderOptions`. You can then decode your data with `await decoder.decode(data)` from a single JamPak-encoded `Buffer` and returns the decoded object typed `unknown`. If the type of data passed to decode is a `string` it will assume it is a file path and try to read the file data directly.
+
+For example:
+
+```typescript
+import { JPDecodeAsync } from "jampak";
+
+const decoder: new JPDecodeAsync({encryptionKey: 1234});
+
+const object = await decoder.decode('./foo.jpk');
+
+console.log(object);
+```
+
 #### `DecoderOptions`
 
-| Name            | Type                | Default                                        | Desc |
-| --------------- | ------------------- | ---------------------------------------------- | ---- |
-| extensionCodec  | JPExtensionCodec      | `ExtensionCodec.defaultCodec`                  | User added extension types, see [Extension Types](#extension-types). |
-| keysArray       | string[]            | []                                             | String array from when `stripKeys` was used during encoding. |
-| encryptionKey | number| undefined | 32 bit encryption key for when `stripEncryptKey` was enabled in encoding. |
-| enforceBigInt | boolean | false |  Ensures all 64 bit values return as `bigint` |
-| makeJSON | boolean | false | Forces the decoder to only return only a valid JSON object. See table below for conversions. |
+| Name            | Type                | Default                       | Desc |
+| --------------- | ------------------- | ----------------------------- | ---- |
+| extensionCodec  | JPExtensionCodec    | `ExtensionCodec.defaultCodec` | User added extension types, see [Extension Types](#extension-types). |
+| keysArray       | string[]            | []                            | String array from when `stripKeys` was used during encoding. |
+| encryptionKey   | number              | undefined                     | 32 bit encryption key for when `stripEncryptKey` was enabled in encoding. |
+| enforceBigInt   | boolean             | false                         |  Ensures all 64 bit values return as `bigint` |
+| makeJSON        | boolean             | false                         | Forces the decoder to only return only a valid JSON object. See table below for conversions. |
 
 #### Types to JSON table
 
 Type conversion when using `makeJSON` in the decoder.
 
-| Type                                            | Conversion |
-| ------------------------- | -------------------------------------------------- | 
-|`undefined`| `"undefined"` string|
-|`RegExp`| `{regexSrc: string, regexFlags: string}` object|
-|`symbol`|`{symbolGlobal: boolean, symbolKey: string}` object|
-|`bigint`|`number` if safe, otherwise `string`|
-|`Set`|`Array`|
-|`Map`|`Array[]`|
+| Type       | Conversion |
+| ---------  | -------------------------------------------------- | 
+|`undefined` | `"undefined"` string |
+|`RegExp`    | `{regexSrc: string, regexFlags: string}` object |
+|`symbol`    | `{symbolGlobal: boolean, symbolKey: string}` object |
+|`bigint`    | `number` if safe, otherwise `string` |
+|`Set`       | `Array` |
+|`Map`       | `Array[]` |
 
 Note: If you create [Extension Types](#extension-types), you must handle the conversion in your decode function.
 
-```typescript
-import { JPEncode, JPDecode } from "jampak";
-
-const object = {
-  null: null,
-  undefined: undefined,
-  integer: 1,
-  float: Math.PI,
-  bigint: 0x100000000000000n,
-  string: "Hello, world!",
-  array: [10, 20, 30],
-  object: { foo: "bar" },
-  mapExt: new Map([["key1","data1"],["key2","data2"]]),
-  setExt: new Set([50, 60, 70]),
-  symbolExt: Symbol("symbol"),
-  regexExt: /(regex)/g,
-  uint8arrayExt: new Uint8Array([1, 2, 3]),
-  dateExt: new Date()
-};
-
-const encoder = new JPEncode();
-
-const encoded: Buffer = encoder.encode(object);
-
-const decoder: new JPDecode({makeJSON: true});
-
-const object = decoder.decode(encoded);
-
-console.log(object);
-// {
-//   null: null,
-//   undefined: 'undefined',
-//   integer: 1,
-//   float: 3.141592653589793,
-//   bigint: '72057594037927936',
-//   string: 'Hello, world!',
-//   array: [ 10, 20, 30 ],
-//   object: { foo: 'bar' },
-//   mapExt: [ [ 'key1', 'data1' ], [ 'key2', 'data2' ] ],
-//   setExt: [ 50, 60, 70 ],
-//   symbolExt: { symbolGlobal: false, symbolKey: 'symbol' },
-//   regexExt: { regexSrc: '(regex)', regexFlags: 'g' },
-//   uint8arrayExt: { '0': 1, '1': 2, '2': 3 },
-//   bufferExt: { type: 'Buffer', data: [ 1, 2, 3 ] },
-//   dateExt: '2025-07-10T02:17:53.721Z'
-// }
-```
-
 #### Class `JPDecode` functions
 
-Note: Outside of the basic `decode`, these functions should only be used within a user created [Extension Type](#extension-types).
+Note: Outside of the basic `decode`, these functions should only be used within a user created [Extension Type](#extension-types). Using the `JPDecodeAsync` class returns a promise instead.
 
-
-| Functions        | Type                                            | Desc |
-| ------------------------- | -------------------------------------------------- | ---  |
-| decode(bufferOrSourcePath)  | `function (Buffer \| string) : unknown` | Your Buffer to decode or the source path to a JamPak file. | The function that decodes the JamPak Buffer. |
-| decodeAsync(bufferOrSourcePath)  | `function (Buffer \| string) : Promise<unknown>` | Your Buffer to decode or the source path to a JamPak file. | The function that decodes the JamPak Buffer. |
-| doDecodeSync(bufferOrReader)| `function (reader: Buffer \| BiReader \| BiReaderStream): unknown` | [Extension](#extension-types) function use only. Runs a raw decode on the passed `BiReader`'s Buffer. Return data wherever it ends based on the start value. |
-|doDecodeAsync(bufferOrReader)| `async function (reader: Buffer \| BiReader \| BiReaderStream): Promise<unknown>` | [Extension](#extension-types) function use only. Runs a raw decode on the passed `Buffer` or `BiReader`. Return data wherever it ends based on the start value. |
+| Functions                   | Type                                                                              | Desc |
+| -------------------------   | --------------------------------------------------                                | ---  |
+| decode(bufferOrSourcePath)  | `function (Buffer \| string) : unknown`                                           | Your Buffer to decode or the source path to a JamPak file. | The function that decodes the JamPak Buffer. |
+| doDecode(bufferOrReader)    | `function (reader: Buffer \| BiReader\| BiReaderAsync): unknown`                  | [Extension](#extension-types) function use only. Runs a raw decode on the passed `BiReader` \ `BiReader`'s Buffer. Return data wherever it ends based on the start value. |
 
 #### Class `JPDecode` objects
 
@@ -254,11 +262,11 @@ After `decode` or `decodeAsync` as run.
 
 | Name                      | Type                                       | Desc                                            
 | ------------------------- | ------------------------------------------ | -------------------------------------------------- 
-| symbolList | symbol[] | Any symbol created on decode are in this array. |
-| hasExtensions | boolean | If the returned data had any extension types used. |
-| validJSON |`boolean` | If the decoded data can to converted to JSON |
-| CRC32OnFile | `number` | The CRC32 hash on file. | 
-| CRC32Hash | `number` | The computed CRC32 hash of the file. | 
+| symbolList                | symbol[]                                   | Any symbol created on decode are in this array. |
+| hasExtensions             | boolean                                    | If the returned data had any extension types used. |
+| validJSON                 | `boolean`                                  | If the decoded data can to converted to JSON |
+| CRC32OnFile               | `number`                                   | The CRC32 hash on file. | 
+| CRC32Hash                 | `number`                                   | The computed CRC32 hash of the file. | 
 
 ## Extension Types
 
@@ -267,7 +275,7 @@ To handle Extension Types, this library provides `JPExtensionCodec` class.
 This is an example to setup custom extension types that handles `Date` classes in TypeScript:
 
 ```typescript
-import { BiWriter, BiReader, BiReaderStream } from "bireader";
+import { BiWriter, BiReader } from "bireader";
 import { JPDecode, JPEncode, JPExtensionCodec } from "jampak";
 
 // Note this is an example, this extension is built in.
@@ -325,7 +333,7 @@ function encodeTimestampExtension<ContextType = undefined>(
 
         bw.trim();
 
-        return bw.return as Buffer;
+        return bw.return() as Buffer;
       } else {
         // timestamp 64 = { nsec30 (unsigned), sec34 (unsigned) }
         const secHigh = sec / 0x100000000;
@@ -338,7 +346,7 @@ function encodeTimestampExtension<ContextType = undefined>(
 
         bw.trim();
 
-        return bw.return as Buffer;
+        return bw.return() as Buffer;
       }
     } else {
       // timestamp 96 = { nsec32 (unsigned), sec64 (signed) }
@@ -348,7 +356,7 @@ function encodeTimestampExtension<ContextType = undefined>(
 
       bw.trim();
 
-      return bw.return as Buffer;
+      return bw.return() as Buffer;
     }
   }
 };
@@ -356,14 +364,14 @@ function encodeTimestampExtension<ContextType = undefined>(
 /**
  * Example decoding function
  * 
- * @param {BiReader | BiReaderStream} data - BiReader of buffer data.
+ * @param {BiReader} data - BiReader of buffer data.
  * @param {JPDecode<ContextType>} decoder - class decoder
  * @param {number} extensionType - Registered extension number between 0x00 - 0xCF (for dummy checks)
  * @param {ContextType} context - Context of the class (shouldn't be needed)
  * @returns {Date}
  */
 function decodeTimestampExtension<ContextType = undefined>(
-  data: BiReader | BiReaderStream,
+  data: BiReader,
   decoder: JPDecode<ContextType>,
   extensionType: number,
   context: ContextType): Date {
@@ -413,6 +421,9 @@ export const timestampExtension: JPExtensionType = {
   type: DATE_EXT_TYPE,
   encode: encodeTimestampExtension,
   decode: decodeTimestampExtension,
+  // dummy functions for async, not in use here
+  encodeAsync: async () => Buffer.alloc(0),
+  decodeAsync: async () => {},
 };
 
 const ExtCodec = new JPExtensionCodec();
@@ -437,7 +448,7 @@ Note that extension types for custom objects must be `0x00 - 0xCF`, while `0xD0 
 When you use an extension codec, it might be necessary to have encoding/decoding state to keep track of which objects got encoded/re-created. To do this, pass a `context` to the `EncoderOptions` and `DecoderOptions`:
 
 ```typescript
-import { BiWriter, BiReader, BiReaderStream } from "bireader";
+import { BiWriter, BiReader } from "bireader";
 import { JPDecode, JPEncode, JPExtensionCodec } from "jampak";
 
 class MyContext {
@@ -516,7 +527,7 @@ This library is based around the MessagePack specification (head byte, optional 
 
 The following table shows how JavaScript values are mapped to JamPak formats.
 
-| Source Value          | Head Byte      | Desc                  |
+| Source Value          | Head Byte                | Desc                  |
 | --------------------- | ------------------------ | --------------------- |
 | number                | 0x00 - 0x7F, 0xE0 - 0xFF | Small values saved directly, same as MessagePack |
 | Object                | 0x80 - 0x8F, 0xC7 - 0xC9 | Always as `Record<string, unknown>`      |

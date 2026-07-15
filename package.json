@@ -1,6 +1,6 @@
 {
     "name": "jampak",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "description": "JamPak file Encoder and Decoder",
     "main": "./dist/index.cjs.js",
     "module": "./dist/index.esm.js",
@@ -53,14 +53,12 @@
     },
     "dependencies": {
         "bireader": "^4.0.10",
-        "cbor-x": "^1.6.4",
-        "msgpackr": "^2.0.4"
+        "cbor-x": "^1.6.4"
     },
     "engines": {
         "node": ">=18"
     },
     "allowScripts": {
-        "msgpackr-extract@3.0.4": true,
         "cbor-extract@2.2.2": true
     }
 }

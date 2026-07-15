@@ -850,11 +850,11 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
             }
 
             this.valueReaderAsync = new BiReaderAsync(await this.compReaderAsync.extract(Number(this.VALUE_SIZE), true));
-            console.log("valueReaderAsync", this.compReaderAsync.offset, await this.valueReaderAsync.get())
+
             this.valueReaderAsync.endian = this.endian;
 
             this.strReaderAsync = new BiReaderAsync(await this.compReaderAsync.extract(Number(this.STR_SIZE), true));
-            console.log("strReaderAsync", this.compReaderAsync.offset,await this.strReaderAsync.get())
+
             this.strReaderAsync.endian = this.endian;
         }
     };

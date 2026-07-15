@@ -7,6 +7,8 @@ import {
     BiReader, 
     BiWriter 
 } from 'bireader';
+import { Decoder } from 'cbor-x';
+import zlib from "zlib";
 import { 
     JPExtensionCodec, 
     JPExtensionCodecType 
@@ -376,6 +378,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
     CRC32OnFile = 0;
 
     /**
+     * uses msgpack data
+     */
+    useMSGPK = 0;
+
+    /**
      * Set up with basic options.
      * 
      * @param {DecoderOptions?} options - options for decoding
@@ -446,10 +453,64 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         try {
             this.entered = true;
 
+            if(this.useMSGPK){
+                var compData = this.buffer.subarray(this.HEADER_SIZE, this.buffer.length);
+
+                if (this.Encrypted) {
+                    var finalSize = 0;
+
+                    if (this.Compressed) {
+                        finalSize = Number(this.DATA_SIZE);
+                    } else {
+                        finalSize = Number(this.VALUE_SIZE + this.STR_SIZE);
+                    }
+
+                    compData = this.decrypt(null, compData, finalSize);
+                }
+
+                if (this.Compressed) {
+                    const totalBuffer = compData.length;
+
+                    let bytesRead = 0;
+
+                    const buffers: Buffer[] = [];
+
+                    while (bytesRead < totalBuffer) {
+                        const chunkLen = compData.readUInt32LE(bytesRead); bytesRead += 4;
+
+                        const compressed = compData.subarray(bytesRead, bytesRead + chunkLen); bytesRead += chunkLen;
+
+                        const decompressed = zlib.inflateSync(compressed);
+
+                        buffers.push(decompressed);
+                    }
+
+                    compData = Buffer.concat(buffers);
+                }
+
+                if (this.Crc32) {
+                    this.CRC32Hash = CRC32(compData, 0) >>> 0;
+
+                    if (this.CRC32Hash != this.CRC32OnFile) {
+                        this.addError(`File DID NOT pass CRC32 check, may be corrupt. Expecting ${this.CRC32OnFile} but got ${this.CRC32Hash}. ` + this.fileName);
+                    }
+                }
+
+                if (this.VALUE_SIZE + this.STR_SIZE != BigInt(compData.length)) {
+                    this.addError(`File size DID NOT match headers, may be corrupt. Expecting ${this.VALUE_SIZE + this.STR_SIZE} but got ${compData.length}. ` + this.fileName);
+                }
+
+                const decoder = new Decoder({encodeUndefinedAsNil: true, variableMapSize:true});
+
+                const encodedData = decoder.decode(compData);
+
+                return encodedData;
+            }
+
             this.reinitializeState();
 
             if (this.valueReader == null) {
-                this.throwError(" No value reader set. " + this.fileName);
+                this.throwError("No value reader set. " + this.fileName);
             }
 
             this.stringsList = this.createStringList() as string[];
@@ -489,7 +550,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
         biTest.close();
 
-        if(!this.useFile){
+        if(!this.useFile || this.useMSGPK){
             this.buffer = fs.readFileSync(filePath);
         }
     };
@@ -523,7 +584,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
         this.KeyStripped = br.bit1 as bit;
 
-        br.bit1;  // FLAG6
+        this.useMSGPK = br.bit1 as bit;
 
         br.bit1;  // FLAG7
 
@@ -548,11 +609,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         }
 
         if (this.EncryptionExcluded && this.encryptionKey == 0) {
-            this.throwError(' The encryption key is not included in the file and the key was not set in the decoder. Can not decode. ' + this.fileName);
+            this.throwError('The encryption key is not included in the file and the key was not set in the decoder. Can not decode. ' + this.fileName);
         }
 
         if (this.KeyStripped && this.keysArray.length == 0) {
-            this.throwError(' The keysArray was removed from the file and not set in the decoder. Can not decode. ' + this.fileName);
+            this.throwError('The keysArray was removed from the file and not set in the decoder. Can not decode. ' + this.fileName);
         }
         // extra headers
         if (this.Crc32) {
@@ -598,7 +659,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 compWriter.open();
 
-                compWriter.overwrite(this.compReader.subarray(this.HEADER_SIZE, this.compReader.size - this.HEADER_SIZE), compWriter.offset, true);
+                compWriter.overwrite(this.compReader.subarray(this.HEADER_SIZE, this.compReader.size), compWriter.offset, true);
 
                 compWriter.trim();
 
@@ -656,7 +717,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                     compWriter.open();
 
-                    compWriter.overwrite(this.compReader.subarray(this.HEADER_SIZE, this.compReader.size - this.HEADER_SIZE), compWriter.offset, true);
+                    compWriter.overwrite(this.compReader.subarray(this.HEADER_SIZE, this.compReader.size), compWriter.offset, true);
 
                     compWriter.trim();
 
@@ -794,7 +855,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             }
         } else {
             if (this.buffer == null) {
-                this.throwError(" Buffer not set. " + this.fileName);
+                this.throwError("Buffer not set. " + this.fileName);
             }
 
             this.fileReader = new BiReader(this.buffer, {enforceBigInt: this.enforceBigInt});
@@ -822,6 +883,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 this.compReader.endian = this.endian;
             }
+
             if (this.Compressed) {
                 decomBuffer = inflateBuffer(this.compReader);
 
@@ -829,6 +891,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
                 this.compReader.endian = this.endian;
             }
+
             if (this.Crc32) {
                 const data = this.compReader.data as Buffer;
 
@@ -867,7 +930,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
     private createStringList() {
         if (this.strReader == null) {
-            this.throwError(" string reader not set. " + this.fileName);
+            this.throwError("string reader not set. " + this.fileName);
         }
 
         DECODE: while (true) {
@@ -936,7 +999,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                         continue DECODE;
                     }
                 } else {
-                    this.throwError(' Should only have an array in the string data, found type ' + state.type + " in file " + this.fileName);
+                    this.throwError('Should only have an array in the string data, found type ' + state.type + " in file " + this.fileName);
                 }
             }
 
@@ -962,11 +1025,11 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         }
 
         if(!(reader instanceof BiReader) || reader == null){
-            this.throwError(" Value reader not set. " + this.fileName);
+            this.throwError("Value reader not set. " + this.fileName);
         }
 
         if(this.strReader == null){
-            this.throwError(" String reader not set. " + this.fileName);
+            this.throwError("String reader not set. " + this.fileName);
         }
 
         reader = reader as BiReader<any, any>;
@@ -1226,7 +1289,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     }
                 } else if (state.type === STATE_OBJECT_KEY) {
                     if (object === "__proto__") {
-                        this.throwError(" The key __proto__ is not allowed " + this.fileName);
+                        this.throwError("The key __proto__ is not allowed " + this.fileName);
                     }
 
                     state.key = this.mapKeyConverter(object);
@@ -1252,7 +1315,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
                     }
                 } else if (state.type === STATE_MAP_KEY) {
                     if (object === "__proto__") {
-                        this.throwError(" The key __proto__ is not allowed " + this.fileName);
+                        this.throwError("The key __proto__ is not allowed " + this.fileName);
                     }
 
                     state.key = this.mapKeyConverter(object);
@@ -1302,7 +1365,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
     private readString(headByte: number) {
         if (this.valueReader == null) {
-            this.throwError(" Value reader not set. " + this.fileName);
+            this.throwError("Value reader not set. " + this.fileName);
         }
 
         var value = "";
@@ -1540,13 +1603,13 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
         if (!this.useFile) {
             if(buffer == null){
-                this.throwError(" Buffer to decrypt not set. " + this.fileName);
+                this.throwError("Buffer to decrypt not set. " + this.fileName);
             }
 
             const decrypted = cypter.decrypt(buffer);
 
             if(decrypted.length != finalSize){
-                this.addError(`Decrypted buffer size of ${decrypted.length} wasn expected size of ${finalSize} in file ` + this.fileName);
+                this.addError(`Decrypted buffer size of ${decrypted.length} instead of ${finalSize} in file ` + this.fileName);
             }
 
             return decrypted;

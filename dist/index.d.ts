@@ -26,6 +26,7 @@ declare class JPEncode<ContextType = undefined> extends JPBase {
      */
     get VERSION_MINOR(): ubyte;
     CRC32Hash: number;
+    useMSGPK: number;
     /**
      * Set up with basic options
      *
@@ -236,6 +237,7 @@ declare class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
      */
     get VERSION_MINOR(): ubyte;
     CRC32Hash: number;
+    useMSGPK: number;
     /**
      * Set up with basic options
      *
@@ -469,6 +471,10 @@ declare class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
      * CRC32 Hash on file.
      */
     CRC32OnFile: number;
+    /**
+     * uses msgpack data
+     */
+    useMSGPK: number;
     /**
      * Set up with basic options.
      *
@@ -790,6 +796,12 @@ type JPFlags = {
      * bit 5
      */
     KeyStripped: bit;
+    /**
+     * Use msgpack data.
+     *
+     * bit 6
+     */
+    MSGPK: bit;
 };
 type ContextOf<ContextType> = ContextType extends undefined ? object : {
     /**
@@ -903,6 +915,12 @@ type EncoderOptions<ContextType = undefined> = Partial<Readonly<{
      * Larger amounts speed up writes.
      */
     growthIncrement?: number;
+    /**
+     * If you want to use msgpack instead of the jampack system for store
+     *
+     * Faster but limits the amount of data that you can store.
+     */
+    msgpack: boolean;
 }>> & ContextOf<ContextType>;
 declare class JPBase {
     /**
@@ -1045,6 +1063,18 @@ declare class JPBase {
      * @param {bit} bit flag
      */
     set KeyStripped(bit: bit);
+    /**
+     * If the data is stored in msgpack.
+     *
+     * @returns {bit} flag
+     */
+    get MSGPACK(): bit;
+    /**
+     * If the data is stored in msgpack.
+     *
+     * @param {bit} bit flag
+     */
+    set MSGPACK(bit: bit);
     /**
      * Encryption key For decryption.
      */
@@ -1224,6 +1254,18 @@ declare class JPBaseAsync {
      */
     set KeyStripped(bit: bit);
     /**
+     * If the data is stored in msgpack.
+     *
+     * @returns {bit} flag
+     */
+    get MSGPACK(): bit;
+    /**
+     * If the data is stored in msgpack.
+     *
+     * @param {bit} bit flag
+     */
+    set MSGPACK(bit: bit);
+    /**
      * Encryption key For decryption.
      */
     private _encryptionKey;
@@ -1310,6 +1352,10 @@ declare class JPDecode<ContextType = undefined> extends JPBase {
      * CRC32 Hash on file.
      */
     CRC32OnFile: number;
+    /**
+     * uses msgpack data
+     */
+    useMSGPK: number;
     /**
      * Set up with basic options.
      *

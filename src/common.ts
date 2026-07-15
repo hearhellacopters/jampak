@@ -8,7 +8,7 @@ import {
     BiWriterAsync
 } from 'bireader';
 import { JPExtensionCodecType } from "./ext.js";
-import pack from '../package.json';
+import pak from '../package.json';
 
 export const GROWTHINCREMENT_DEFAULT = 0x1000000;
 
@@ -22,7 +22,7 @@ type readerAsync = BiReaderAsync<Buffer, any> | BiWriterAsync<Buffer, any>;
  * @returns {{VERSION_MAJOR: ubyte, VERSION_MINOR: ubyte}}
  */
 function GetVer(): { VERSION_MAJOR: ubyte, VERSION_MINOR: ubyte } {
-    const ver = /(\d+)(\.)(\d+)(\.)(\d+)/g.exec(pack.version);
+    const ver = /(\d+)(\.)(\d+)(\.)(\d+)/g.exec(pak.version);
 
     return {
         VERSION_MAJOR: parseInt(ver ? ver[1] : "0"),
@@ -74,7 +74,7 @@ export function isFloat32Safe(value: number): boolean {
 /**
  * 512kb zip chunks
  */
-const CHUNK_SIZE = 512 * 1024;
+export const CHUNK_SIZE = 512 * 1024;
 
 /**
  * Peak starting bytes of a file.
@@ -688,6 +688,12 @@ export type JPFlags = {
      * bit 5
      */
     KeyStripped: bit,
+    /**
+     * Use msgpack data.
+     * 
+     * bit 6
+     */
+    MSGPK: bit
 };
 
 export type ContextOf<ContextType> = ContextType extends undefined
@@ -823,6 +829,13 @@ export type EncoderOptions<ContextType = undefined> = Partial<
          * Larger amounts speed up writes.
          */
         growthIncrement?: number;
+
+        /**
+         * If you want to use msgpack instead of the jampack system for store
+         * 
+         * Faster but limits the amount of data that you can store.
+         */
+        msgpack: boolean;
     }>
 > &
     ContextOf<ContextType>;
@@ -1004,7 +1017,8 @@ export class JPBase {
         Crc32: 0,
         Encrypted: 0,
         EncryptionExcluded: 0,
-        KeyStripped: 0
+        KeyStripped: 0,
+        MSGPK: 0
     };
 
     /**
@@ -1113,6 +1127,24 @@ export class JPBase {
      */
     set KeyStripped(bit: bit) {
         this.flags.KeyStripped = (bit & 1) as bit;
+    };
+
+    /**
+     * If the data is stored in msgpack.
+     * 
+     * @returns {bit} flag
+     */
+    get MSGPACK(): bit {
+        return this.flags.MSGPK;
+    };
+
+    /**
+     * If the data is stored in msgpack.
+     * 
+     * @param {bit} bit flag
+     */
+    set MSGPACK(bit: bit) {
+        this.flags.MSGPK = (bit & 1) as bit;
     };
 
     ////////////////////
@@ -1370,7 +1402,8 @@ export class JPBaseAsync {
         Crc32: 0,
         Encrypted: 0,
         EncryptionExcluded: 0,
-        KeyStripped: 0
+        KeyStripped: 0,
+        MSGPK: 0
     };
 
     /**
@@ -1479,6 +1512,24 @@ export class JPBaseAsync {
      */
     set KeyStripped(bit: bit) {
         this.flags.KeyStripped = (bit & 1) as bit;
+    };
+
+    /**
+     * If the data is stored in msgpack.
+     * 
+     * @returns {bit} flag
+     */
+    get MSGPACK(): bit {
+        return this.flags.MSGPK;
+    };
+
+    /**
+     * If the data is stored in msgpack.
+     * 
+     * @param {bit} bit flag
+     */
+    set MSGPACK(bit: bit) {
+        this.flags.MSGPK = (bit & 1) as bit;
     };
 
     ////////////////////

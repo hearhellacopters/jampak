@@ -1,9 +1,11 @@
 import fsp from "fs/promises";
-import { BiReaderAsync, BiWriterAsync, hexdump } from 'bireader';
+import { BiWriterAsync, hexdump } from 'bireader';
 import { 
     Crypt, 
     CRC32 
 } from './hash.js';
+import zlib from 'zlib';
+import { Encoder } from 'cbor-x';
 import { 
     JPExtensionCodec, 
     JPExtensionCodecType, 
@@ -24,6 +26,7 @@ import {
     JPBaseAsync,
     EncoderOptions,
     GROWTHINCREMENT_DEFAULT,
+    CHUNK_SIZE
 } from './common.js';
 
 /**
@@ -70,6 +73,8 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
 
     CRC32Hash = 0;
 
+    useMSGPK = 0;
+
     /**
      * Set up with basic options
      * 
@@ -97,6 +102,8 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
         this.Crc32 = encodeOptions?.CRC32 ? 1 : 0;
 
         this.growthIncrement = encodeOptions?.growthIncrement ? encodeOptions.growthIncrement : GROWTHINCREMENT_DEFAULT;
+
+        this.useMSGPK = encodeOptions?.msgpack ? 1: 0;
     };
 
     private clone(): JPEncodeAsync<ContextType> {
@@ -123,6 +130,8 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
             CRC32: this.Crc32,
 
             growthIncrement: this.growthIncrement,
+
+            msgpack: this.useMSGPK
         });
 
         clone.fileName = this.fileName;
@@ -163,10 +172,80 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
         try {
             this.entered = true;
 
+            if(this.useMSGPK){
+                const encoder = new Encoder({encodeUndefinedAsNil: true,   variableMapSize:true});
+
+                var data = encoder.encode(object);
+
+                this.VALUE_SIZE = BigInt(data.length);
+
+                this.STR_SIZE = 0;
+
+                this.DATA_SIZE = BigInt(data.length);
+
+                if (this.Crc32) {
+                    this.CRC32 = CRC32(data, 0) >>> 0;
+                }
+
+                if (this.Compressed) {
+                    const buffers = [];
+
+                    let bytesToProcess = data.length;
+
+                    let bytesStart = 0;
+
+                    let bytesRead = 0;
+
+                    do {
+                        bytesRead = Math.min(CHUNK_SIZE, bytesToProcess);
+                
+                        if (bytesRead > 0) {
+                            const chunk = data.subarray(bytesStart, bytesRead);
+                
+                            const compressed = zlib.deflateSync(chunk);
+
+                            const lenBuf = Buffer.alloc(4);
+
+                            lenBuf.writeUint32LE(compressed.length);
+                
+                            buffers.push(lenBuf);
+
+                            buffers.push(compressed);
+                
+                            bytesToProcess -= bytesRead;
+                
+                            bytesStart += bytesRead;
+                        }
+                    } while (bytesRead === CHUNK_SIZE);
+
+                    data = Buffer.concat(buffers);
+
+                    this.DATA_SIZE = BigInt(data.length);
+                }
+
+                if (this.Encrypted) {
+                    const cypter = new Crypt(this.encryptionKey == 0 ? undefined : this.encryptionKey);
+                    
+                    this.encryptionKey = cypter.key;
+
+                    data = cypter.encrypt(data);
+                }
+
+                this.headerBuffer = await this.buildHeader();
+
+                const compBuffer = Buffer.concat([this.headerBuffer, data]);
+
+                if(this.useFile){
+                    await fsp.writeFile(this.fileName, compBuffer);
+                }
+
+                return compBuffer as Buffer;
+            }
+
             await this.reinitializeState();
 
             if (this.valueWriterAsync == null || this.strWriterAsync == null) {
-                this.throwError(" Didn't create writers. " + this.fileName);
+                this.throwError("Didn't create writers. " + this.fileName);
             }
 
             await this.doEncode(this.valueWriterAsync, object, 1);
@@ -194,7 +273,7 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
             this.headerBuffer = await this.buildHeader();
             
             if (this.compWriterAsync == null) {
-                this.throwError(" Didn't create writer. " + this.fileName);
+                this.throwError("Didn't create writer. " + this.fileName);
             }
             
             const newOff = BigInt(this.compWriterAsync.size + this.headerBuffer.length);
@@ -677,7 +756,7 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
         var length = 1;
 
         if (this.strWriterAsync == null) {
-            this.throwError(" Didn't create writer. " + this.fileName);
+            this.throwError("Didn't create writer. " + this.fileName);
         }
 
         if (byteLength < 16) {
@@ -713,7 +792,7 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
 
     private async writeString(object: string) {
         if (this.strWriterAsync == null) {
-            this.throwError(" Didn't create writer. " + this.fileName);
+            this.throwError("Didn't create writer. " + this.fileName);
         }
 
         const encoder = new TextEncoder();
@@ -735,7 +814,7 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
         const size = array.length;
 
         if (this.strWriterAsync == null) {
-            this.throwError(" Didn't create writer. " + this.fileName);
+            this.throwError("Didn't create writer. " + this.fileName);
         }
 
         if (size < 16) {
@@ -1107,7 +1186,7 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
             } else if(object instanceof Float16Array){
                 await valueWriter.ubyte(JPExtType.Float16Array);
             } else {
-                this.throwError(' Unknown Buffer type in file ' + this.fileName);
+                this.throwError('Unknown Buffer type in file ' + this.fileName);
             }
 
             length++;
@@ -1238,7 +1317,7 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
 
         await bw.bit1(this.KeyStripped);
 
-        await bw.bit1(0);  // FLAG6
+        await bw.bit1(this.useMSGPK);
 
         await bw.bit1(0);  // FLAG7
 
@@ -1267,7 +1346,7 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
 
     private async finalizeBuffers() {
         if (this.strWriterAsync == null || this.valueWriterAsync == null) {
-            this.throwError(" Didn't create writers. " + this.fileName);
+            this.throwError("Didn't create writers. " + this.fileName);
         }
 
         const stringData = await this.strWriterAsync.getData();
@@ -1369,7 +1448,7 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
         this.Crc32 = 1;
 
         if (this.compWriterAsync == null) {
-            this.throwError(" Writer not created for CRC. " + this.fileName);
+            this.throwError("Writer not created for CRC. " + this.fileName);
         }
 
         const data = await this.compWriterAsync.getData() as Buffer;

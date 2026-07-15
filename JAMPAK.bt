@@ -1,9 +1,9 @@
 //------------------------------------------------
-//--- 010 Editor v14.0.1 Binary Template
+//--- 010 Editor v16.0 Binary Template
 //
 //      File: JAMPAK.bt
 //   Authors: HearHellacopters
-//   Version: 1.0.7
+//   Version: 1.0.8
 //   Purpose: Storing JavaScript data in binary
 //  Category: Archive
 // File Mask: *.jpk
@@ -526,7 +526,7 @@ struct{
             Encrypted : 1<comment="Encrypted">,                                // Encryption w/ key in file
             EncryptionExcluded : 1<comment="AES decrypt data is stripped from the file">, // Encryption must supply key
             KeyStripped : 1<comment="Object keys are removed from the file">,      // No keys in file, must supply keys
-            FLAG6 : 1<hidden=true>,
+            MSGPACK : 1<comment="File data isin msgpack format">,
             FLAG7 : 1<hidden=true>;
     uint8 RESV_6<hidden=true>;
     uint8 RESV_7<hidden=true>;
@@ -547,7 +547,11 @@ struct{
     local string name<hidden=true> = Str("%s%s%s%s",MAGICS.name, Compressed ? " Compressed" :"", Encrypted ? " Encrypted" : "", KeyStripped ? " Key Stripped" : "");
 }JAMPAK_HEADER<read=this.name>;
 
-if(!JAMPAK_HEADER.Compressed && !JAMPAK_HEADER.Encrypted){
+if(JAMPAK_HEADER.MSGPACK){
+    Printf("Can't parse MSGPACK files.");
+    local uint DATA_SIZE = FileSize() - FTell();
+    ubyte data[DATA_SIZE]<fgcolor=cBlack, bgcolor=cWhite>;
+} else if(!JAMPAK_HEADER.Compressed && !JAMPAK_HEADER.Encrypted){
     FSeek(JAMPAK_HEADER.HEADER_SIZE + JAMPAK_HEADER.VALUE_SIZE);
     local uint64 toRead<hidden=true> = JAMPAK_HEADER.STR_SIZE;
     struct {
@@ -565,7 +569,7 @@ if(!JAMPAK_HEADER.Compressed && !JAMPAK_HEADER.Encrypted){
         } while (toRead > 0);
     } VALUES<open=true>;
 } else {
-    Printf("Can't parse Compressed or Encrypted files.");
-    local uint DATA_SIZE = FileSize() - FTell();
-    ubyte data[DATA_SIZE]<fgcolor=cBlack, bgcolor=cWhite>;
+   Printf("Can't parse Compressed or Encrypted files.");
+   local uint DATA_SIZE = FileSize() - FTell();
+   ubyte data[DATA_SIZE]<fgcolor=cBlack, bgcolor=cWhite>;
 };

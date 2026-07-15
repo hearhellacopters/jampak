@@ -2,7 +2,7 @@
 
 <img src="./img/JamPak.png" width="300px"/>
 
-**JamPak** is an efficient file storage solution specifically made for both JavaScript and TypeScript data types in Node.js with a focus on accuracy, expandability, security, and performance. Includes compact storage of all JSON types as well as `TypedArrays`, `Maps`, `Sets`, `Dates`, `Symbols` and more! This library uses a heavily modified implementation of [**MessagePack**](https://github.com/msgpack/msgpack/blob/master/spec.md) using [**BiReader**](https://github.com/hearhellacopters/bireader) to improve storage size and create efficient binary serialization. 
+**JamPak** is an efficient file storage solution specifically made for both JavaScript and TypeScript data types in Node.js with a focus on accuracy, expandability, security, and performance. Includes compact storage of all JSON types as well as `TypedArrays`, `Maps`, `Sets`, `Dates`, `Symbols`* and more! This library uses a heavily modified implementation of [**MessagePack**](https://github.com/msgpack/msgpack/blob/master/spec.md) using [**BiReader**](https://github.com/hearhellacopters/bireader) to improve storage size and create efficient binary serialization. 
 
 **JamPak** improvements over MessagePack:
  - Reduced file size by spliting data into two sections, **values** and **strings**
@@ -161,6 +161,7 @@ const encryptionKey = encoder.encryptionKey; // Key for later decryption.
 | compress            | boolean            | false                         | Compress the file's data. |
 | stripKeys           | boolean            | false                         | Remove all keys from the save file. Must save the `keysArray` from the class it was created from. |
 | growthIncrement     | number             | 0x1000000                     | Byte amount to start and increase when a Buffer size is needed. |
+| msgpack             | boolean            | false                         | Uses msgpack data structure instead of jampack. NOTE: Does not support symbols! | 
 
 #### Class `JPEncode` functions
 
@@ -240,10 +241,12 @@ Type conversion when using `makeJSON` in the decoder.
 | ---------  | -------------------------------------------------- | 
 |`undefined` | `"undefined"` string |
 |`RegExp`    | `{regexSrc: string, regexFlags: string}` object |
-|`symbol`    | `{symbolGlobal: boolean, symbolKey: string}` object |
+|`symbol`    | `{symbolGlobal: boolean, symbolKey: string}` object* |
 |`bigint`    | `number` if safe, otherwise `string` |
 |`Set`       | `Array` |
 |`Map`       | `Array[]` |
+
+NOTE: `symbol` will error in msgpack mode.
 
 Note: If you create [Extension Types](#extension-types), you must handle the conversion in your decode function.
 
@@ -262,11 +265,13 @@ After `decode` or `decodeAsync` as run.
 
 | Name                      | Type                                       | Desc                                            
 | ------------------------- | ------------------------------------------ | -------------------------------------------------- 
-| symbolList                | symbol[]                                   | Any symbol created on decode are in this array. |
+| symbolList                | symbol[]                                   | Any symbol created on decode are in this array.* |
 | hasExtensions             | boolean                                    | If the returned data had any extension types used. |
 | validJSON                 | `boolean`                                  | If the decoded data can to converted to JSON |
 | CRC32OnFile               | `number`                                   | The CRC32 hash on file. | 
 | CRC32Hash                 | `number`                                   | The computed CRC32 hash of the file. | 
+
+NOTE: `symbol` will error in msgpack mode.
 
 ## Extension Types
 
@@ -518,10 +523,12 @@ This library is based around the MessagePack specification (head byte, optional 
 * [x] `bigint` always encodes to 64 bit but will return as a `number` if within safe `number` range.
 * [x] `Map` ext type (NOT object)
 * [x] `Set` ext type
-* [x] `Symbol` ext type
+* [x] `Symbol` ext type*
 * [x] `TypedArray` ext type (from `BigUint64Array` to `Uint8ClampedArray`)
 * [x] `Buffer` ext type
 * [x] `Date` ext type
+
+NOTE: `Symbol` will error in msgpack mode.
 
 ### JamPak Mapping Table
 

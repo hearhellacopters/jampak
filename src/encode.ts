@@ -1,4 +1,7 @@
 import { BiWriter, hexdump } from 'bireader';
+import { Encoder } from 'cbor-x';
+import zlib from 'zlib';
+import fs from 'fs';
 import { 
     Crypt,
     CRC32 
@@ -22,7 +25,8 @@ import {
     stringList,
     JPBase,
     EncoderOptions,
-    GROWTHINCREMENT_DEFAULT
+    GROWTHINCREMENT_DEFAULT,
+    CHUNK_SIZE
 } from './common.js';
 
 /**
@@ -69,6 +73,8 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
     CRC32Hash = 0;
 
+    useMSGPK = 0;
+
     /**
      * Set up with basic options
      * 
@@ -96,6 +102,8 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         this.Crc32 = encodeOptions?.CRC32 ? 1 : 0;
 
         this.growthIncrement = encodeOptions?.growthIncrement ? encodeOptions.growthIncrement : GROWTHINCREMENT_DEFAULT;
+
+        this.useMSGPK = encodeOptions?.msgpack ? 1: 0;
     };
 
     private clone(): JPEncode<ContextType> {
@@ -122,6 +130,8 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             CRC32: this.Crc32,
 
             growthIncrement: this.growthIncrement,
+
+            msgpack: this.useMSGPK
         });
 
         clone.fileName = this.fileName;
@@ -162,10 +172,80 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         try {
             this.entered = true;
 
+            if(this.useMSGPK){
+                const encoder = new Encoder({encodeUndefinedAsNil: true,   variableMapSize:true});
+
+                var data = encoder.encode(object);
+
+                this.VALUE_SIZE = BigInt(data.length);
+
+                this.STR_SIZE = 0;
+
+                this.DATA_SIZE = BigInt(data.length);
+
+                if (this.Crc32) {
+                    this.CRC32 = CRC32(data, 0) >>> 0;
+                }
+
+                if (this.Compressed) {
+                    const buffers = [];
+
+                    let bytesToProcess = data.length;
+
+                    let bytesStart = 0;
+
+                    let bytesRead = 0;
+
+                    do {
+                        bytesRead = Math.min(CHUNK_SIZE, bytesToProcess);
+                
+                        if (bytesRead > 0) {
+                            const chunk = data.subarray(bytesStart, bytesRead);
+                
+                            const compressed = zlib.deflateSync(chunk);
+
+                            const lenBuf = Buffer.alloc(4);
+
+                            lenBuf.writeUint32LE(compressed.length);
+                
+                            buffers.push(lenBuf);
+
+                            buffers.push(compressed);
+                
+                            bytesToProcess -= bytesRead;
+                
+                            bytesStart += bytesRead;
+                        }
+                    } while (bytesRead === CHUNK_SIZE);
+
+                    data = Buffer.concat(buffers);
+
+                    this.DATA_SIZE = BigInt(data.length);
+                }
+
+                if (this.Encrypted) {
+                    const cypter = new Crypt(this.encryptionKey == 0 ? undefined : this.encryptionKey);
+                    
+                    this.encryptionKey = cypter.key;
+
+                    data = cypter.encrypt(data);
+                }
+
+                this.headerBuffer = this.buildHeader();
+
+                const compBuffer = Buffer.concat([this.headerBuffer, data]);
+
+                if(this.useFile){
+                    fs.writeFileSync(this.fileName, compBuffer);
+                }
+
+                return compBuffer as Buffer;
+            }
+
             this.reinitializeState();
 
             if (this.valueWriter == null || this.strWriter == null) {
-                this.throwError(" Didn't create writers. " + this.fileName);
+                this.throwError("Didn't create writers. " + this.fileName);
             }
 
             this.doEncode(this.valueWriter, object, 1);
@@ -197,7 +277,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             this.headerBuffer = this.buildHeader();
 
             if (this.compWriter == null) {
-                this.throwError(" Didn't create writer. " + this.fileName);
+                this.throwError("Didn't create writer. " + this.fileName);
             }
 
             const newOff = this.compWriter.offset + this.headerBuffer.length;
@@ -667,7 +747,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         var length = 1;
 
         if (this.strWriter == null) {
-            this.throwError(" Didn't create writer. " + this.fileName);
+            this.throwError("Didn't create writer. " + this.fileName);
         }
 
         if (byteLength < 16) {
@@ -702,7 +782,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
     private writeString(object: string) {
         if (this.strWriter == null) {
-            this.throwError(" Didn't create writer. " + this.fileName);
+            this.throwError("Didn't create writer. " + this.fileName);
         }
 
         const encoder = new TextEncoder();
@@ -724,7 +804,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         const size = array.length;
 
         if (this.strWriter == null) {
-            this.throwError(" Didn't create writer. " + this.fileName);
+            this.throwError("Didn't create writer. " + this.fileName);
         }
 
         if (size < 16) {
@@ -1092,7 +1172,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
             } else if(object instanceof Float16Array){
                 valueWriter.ubyte = JPExtType.Float16Array;
             } else {
-                this.throwError(' Unknown Buffer type in file ' + this.fileName);
+                this.throwError('Unknown Buffer type in file ' + this.fileName);
             }
 
             length++;
@@ -1223,7 +1303,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
         bw.bit1 = this.KeyStripped;
 
-        bw.bit1 = 0;  // FLAG6
+        bw.bit1 = this.useMSGPK;
 
         bw.bit1 = 0;  // FLAG7
 
@@ -1254,7 +1334,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
 
     private finalizeBuffers() {
         if (this.strWriter == null || this.valueWriter == null) {
-            this.throwError(" Didn't create writers. " + this.fileName);
+            this.throwError("Didn't create writers. " + this.fileName);
         }
         this.valueWriter.push(this.strWriter.data, true);
 
@@ -1329,7 +1409,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         this.Compressed = 1;
 
         if (this.compWriter == null) {
-            this.throwError(" Writer not created for compression. " + this.fileName);
+            this.throwError("Writer not created for compression. " + this.fileName);
         }
         
         this.compWriter.gotoStart();
@@ -1354,7 +1434,7 @@ export class JPEncode<ContextType = undefined> extends JPBase {
         this.Crc32 = 1;
 
         if (this.compWriter == null) {
-            this.throwError(" Writer not created for CRC. " + this.fileName);
+            this.throwError("Writer not created for CRC. " + this.fileName);
         }
 
         if (!this.useFile) {

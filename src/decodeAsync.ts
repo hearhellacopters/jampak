@@ -7,6 +7,8 @@ import {
     BiReaderAsync, 
     BiWriterAsync 
 } from 'bireader';
+import { Decoder } from 'cbor-x';
+import zlib from "zlib";
 import { 
     JPExtensionCodec, 
     JPExtensionCodecType 
@@ -378,6 +380,11 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
     CRC32OnFile = 0;
 
     /**
+     * uses msgpack data
+     */
+    useMSGPK = 0;
+
+    /**
      * Set up with basic options.
      * 
      * @param {DecoderOptions?} options - options for decoding
@@ -448,10 +455,64 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
         try {
             this.entered = true;
 
+            if(this.useMSGPK){
+                var compData = this.buffer.subarray(this.HEADER_SIZE, this.buffer.length);
+
+                if (this.Encrypted) {
+                    var finalSize = 0;
+
+                    if (this.Compressed) {
+                        finalSize = Number(this.DATA_SIZE);
+                    } else {
+                        finalSize = Number(this.VALUE_SIZE + this.STR_SIZE);
+                    }
+
+                    compData = await this.decrypt(null, compData, finalSize);
+                }
+
+                if (this.Compressed) {
+                    const totalBuffer = compData.length;
+
+                    let bytesRead = 0;
+
+                    const buffers: Buffer[] = [];
+
+                    while (bytesRead < totalBuffer) {
+                        const chunkLen = compData.readUInt32LE(bytesRead); bytesRead += 4;
+
+                        const compressed = compData.subarray(bytesRead, bytesRead + chunkLen); bytesRead += chunkLen;
+
+                        const decompressed = zlib.inflateSync(compressed);
+
+                        buffers.push(decompressed);
+                    }
+
+                    compData = Buffer.concat(buffers);
+                }
+
+                if (this.Crc32) {
+                    this.CRC32Hash = CRC32(compData, 0) >>> 0;
+
+                    if (this.CRC32Hash != this.CRC32OnFile) {
+                        this.addError(`File DID NOT pass CRC32 check, may be corrupt. Expecting ${this.CRC32OnFile} but got ${this.CRC32Hash}. ` + this.fileName);
+                    }
+                }
+
+                if (this.VALUE_SIZE + this.STR_SIZE != BigInt(compData.length)) {
+                    this.addError(`File size DID NOT match headers, may be corrupt. Expecting ${this.VALUE_SIZE + this.STR_SIZE} but got ${compData.length}. ` + this.fileName);
+                }
+
+                const decoder = new Decoder({encodeUndefinedAsNil: true, variableMapSize:true});
+
+                const encodedData = decoder.decode(compData);
+
+                return encodedData;
+            }
+
             await this.reinitializeState();
 
             if (this.valueReaderAsync == null) {
-                this.throwError(" No value reader set. " + this.fileName);
+                this.throwError("No value reader set. " + this.fileName);
             }
 
             this.stringsList = await this.createStringList() as string[];
@@ -488,7 +549,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
 
             biTest.close();
 
-            if(!this.LargeFile){
+            if(!this.LargeFile || this.useMSGPK){
                 this.buffer = await fsp.readFile(filePath);
             }
         } else {
@@ -527,7 +588,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
 
         this.KeyStripped = await br.bit1() as bit;
 
-        await br.bit1();  // FLAG6
+        this.useMSGPK = await br.bit1() as bit;
 
         await br.bit1();  // FLAG7
 
@@ -552,11 +613,11 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
         }
 
         if (this.EncryptionExcluded && this.encryptionKey == 0) {
-            this.throwError(' The encryption key is not included in the file and the key was not set in the decoder. Can not decode. ' + this.fileName);
+            this.throwError('The encryption key is not included in the file and the key was not set in the decoder. Can not decode. ' + this.fileName);
         }
 
         if (this.KeyStripped && this.keysArray.length == 0) {
-            this.throwError(' The keysArray was removed from the file and not set in the decoder. Can not decode. ' + this.fileName);
+            this.throwError('The keysArray was removed from the file and not set in the decoder. Can not decode. ' + this.fileName);
         }
         // extra headers
         if (this.Crc32) {
@@ -604,7 +665,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
 
                 await compWriter.open();
 
-                await compWriter.overwrite(await this.compReaderAsync.subarray(this.HEADER_SIZE, this.compReaderAsync.size - this.HEADER_SIZE), compWriter.offset, true);
+                await compWriter.overwrite(await this.compReaderAsync.subarray(this.HEADER_SIZE, this.compReaderAsync.size), compWriter.offset, true);
 
                 await compWriter.trim();
 
@@ -662,7 +723,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
 
                     await compWriter.open();
 
-                    await compWriter.overwrite(await this.compReaderAsync.subarray(this.HEADER_SIZE, this.compReaderAsync.size - this.HEADER_SIZE), compWriter.offset, true);
+                    await compWriter.overwrite(await this.compReaderAsync.subarray(this.HEADER_SIZE, this.compReaderAsync.size), compWriter.offset, true);
 
                     await compWriter.trim();
 
@@ -800,7 +861,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
             }
         } else {
             if (this.buffer == null) {
-                this.throwError(" Buffer not set. " + this.fileName);
+                this.throwError("Buffer not set. " + this.fileName);
             }
 
             this.fileReaderAsync = new BiReaderAsync(this.buffer, { enforceBigInt: this.enforceBigInt});
@@ -873,7 +934,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
 
     private async createStringList() {
         if (this.strReaderAsync == null) {
-            this.throwError(" string reader not set. " + this.fileName);
+            this.throwError("string reader not set. " + this.fileName);
         }
 
         DECODE: while (true) {
@@ -942,7 +1003,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
                         continue DECODE;
                     }
                 } else {
-                    this.throwError(' Should only have an array in the string data, found type ' + state.type + " in file " + this.fileName);
+                    this.throwError('Should only have an array in the string data, found type ' + state.type + " in file " + this.fileName);
                 }
             }
 
@@ -970,11 +1031,11 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
         }
 
         if(!(reader instanceof BiReaderAsync) || reader == null){
-            this.throwError(" Value reader not set. " + this.fileName);
+            this.throwError("Value reader not set. " + this.fileName);
         }
 
         if(this.strReaderAsync == null){
-            this.throwError(" String reader not set. " + this.fileName);
+            this.throwError("String reader not set. " + this.fileName);
         }
 
         try{
@@ -1003,11 +1064,11 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
         }
 
         if(!(reader instanceof BiReaderAsync) || reader == null){
-            this.throwError(" Value reader not set. " + this.fileName);
+            this.throwError("Value reader not set. " + this.fileName);
         }
 
         if(this.strReaderAsync == null){
-            this.throwError(" String reader not set. " + this.fileName);
+            this.throwError("String reader not set. " + this.fileName);
         }
 
         reader = reader as BiReaderAsync<any, any>;
@@ -1267,7 +1328,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
                     }
                 } else if (state.type === STATE_OBJECT_KEY) {
                     if (object === "__proto__") {
-                        this.throwError(" The key __proto__ is not allowed " + this.fileName);
+                        this.throwError("The key __proto__ is not allowed " + this.fileName);
                     }
 
                     state.key = this.mapKeyConverter(object);
@@ -1293,7 +1354,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
                     }
                 } else if (state.type === STATE_MAP_KEY) {
                     if (object === "__proto__") {
-                        this.throwError(" The key __proto__ is not allowed " + this.fileName);
+                        this.throwError("The key __proto__ is not allowed " + this.fileName);
                     }
 
                     state.key = this.mapKeyConverter(object);
@@ -1343,7 +1404,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
 
     private async readString(headByte: number) {
         if (this.valueReaderAsync == null) {
-            this.throwError(" Value reader not set. " + this.fileName);
+            this.throwError("Value reader not set. " + this.fileName);
         }
 
         var value = "";
@@ -1581,13 +1642,13 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
 
         if (!this.useFile) {
             if(buffer == null){
-                this.throwError(" Buffer to decrypt not set. " + this.fileName);
+                this.throwError("Buffer to decrypt not set. " + this.fileName);
             }
 
             const decrypted = cypter.decrypt(buffer);
 
             if(decrypted.length != finalSize){
-                this.addError(`Decrypted buffer size of ${decrypted.length} wasn expected size of ${finalSize} in file ` + this.fileName);
+                this.addError(`Decrypted buffer size of ${decrypted.length} instead of ${finalSize} in file ` + this.fileName);
             }
 
             return decrypted;

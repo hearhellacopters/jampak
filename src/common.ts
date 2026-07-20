@@ -742,6 +742,11 @@ export type DecoderOptions<ContextType = undefined> = Readonly<
          * This will mostly suppress / convert all extention types that aren't valid JSON.
          */
         makeJSON?: boolean;
+
+        /**
+         * Fallback encryption
+         */
+        useFallback?: boolean;
     }>
 > &
     ContextOf<ContextType>;
@@ -836,6 +841,11 @@ export type EncoderOptions<ContextType = undefined> = Partial<
          * Faster but limits the amount of data that you can store.
          */
         msgpack?: boolean;
+
+        /**
+         * Fallback encryption
+         */
+        useFallback?: boolean;
     }>
 > &
     ContextOf<ContextType>;
@@ -1199,6 +1209,8 @@ export class JPBase {
      * This array MUST be passed to decoder for the file to be decoded.
      */
     keysArray: string[] = [];
+
+    useFallback = false;
 
     entered = false;
 
@@ -1584,6 +1596,8 @@ export class JPBaseAsync {
      * This array MUST be passed to decoder for the file to be decoded.
      */
     keysArray: string[] = [];
+
+    useFallback = false;
 
     entered = false;
 

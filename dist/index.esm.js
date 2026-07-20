@@ -23289,7 +23289,7 @@ class Crypt {
     hash = "";
     useFallback = false;
     fallback = null;
-    constructor(key) {
+    constructor(key, useFallback) {
         if (key == 0 || key == undefined) {
             const rng = new RandomXorShift();
             this.key = rng.random_int();
@@ -23313,6 +23313,9 @@ class Crypt {
         }
         this.hash = this.hashArray[hash % this.hashArray.length];
         if ((ciphers.findIndex((x) => x === this.hash) == -1)) {
+            this.useFallback = true;
+        }
+        if (useFallback) {
             this.useFallback = true;
         }
         this.keyBuff = keyBuff.data;
@@ -23487,6 +23490,9 @@ function removePKCSPadding(buffer, number, PKCS = false) {
     if (PKCS == true) {
         if (lastByte < 1 || lastByte > 17) {
             return buffer;
+        }
+        if (lastByte == 16) {
+            return Buffer.alloc(0);
         }
         var len = buffer.length;
         var removed = 0;
@@ -27530,7 +27536,7 @@ class JPExtensionCodec {
     }
 }
 
-var version = "1.0.10";
+var version = "1.0.11";
 var pak = {
 	version: version};
 
@@ -28318,6 +28324,7 @@ class JPBase {
      * This array MUST be passed to decoder for the file to be decoded.
      */
     keysArray = [];
+    useFallback = false;
     entered = false;
     fileName = "";
     errored = false;
@@ -28669,6 +28676,7 @@ class JPBaseAsync {
      * This array MUST be passed to decoder for the file to be decoded.
      */
     keysArray = [];
+    useFallback = false;
     entered = false;
     fileName = "";
     errored = false;
@@ -28910,10 +28918,6 @@ class JPDecode extends JPBase {
      */
     CRC32OnFile = 0;
     /**
-     * uses msgpack data
-     */
-    useMSGPK = 0;
-    /**
      * Set up with basic options.
      *
      * @param {DecoderOptions?} options - options for decoding
@@ -28926,6 +28930,7 @@ class JPDecode extends JPBase {
         this.encryptionKey = options?.encryptionKey ? options.encryptionKey : 0;
         this.enforceBigInt = options?.enforceBigInt ? options.enforceBigInt : false;
         this.makeJSON = options?.makeJSON ? options.makeJSON : false;
+        this.useFallback = options?.useFallback ? options.useFallback : false;
     }
     ;
     clone() {
@@ -28939,6 +28944,7 @@ class JPDecode extends JPBase {
             encryptionKey: this.encryptionKey,
             enforceBigInt: this.enforceBigInt,
             makeJSON: this.makeJSON,
+            useFallback: this.useFallback
         });
         clone.fileName = this.fileName;
         // TODO may need more
@@ -28968,7 +28974,7 @@ class JPDecode extends JPBase {
         }
         try {
             this.entered = true;
-            if (this.useMSGPK) {
+            if (this.MSGPACK) {
                 var compData = this.buffer.subarray(this.HEADER_SIZE, this.buffer.length);
                 if (this.Encrypted) {
                     var finalSize = 0;
@@ -29038,7 +29044,7 @@ class JPDecode extends JPBase {
         biTest = new BiReader(testBuffer, { enforceBigInt: this.enforceBigInt });
         this.testHeader(biTest);
         biTest.close();
-        if (!this.useFile || this.useMSGPK) {
+        if (!this.useFile || this.MSGPACK) {
             this.buffer = fs.readFileSync(filePath);
         }
     }
@@ -29060,7 +29066,7 @@ class JPDecode extends JPBase {
         this.Encrypted = br.bit1;
         this.EncryptionExcluded = br.bit1;
         this.KeyStripped = br.bit1;
-        this.useMSGPK = br.bit1;
+        this.MSGPACK = br.bit1;
         br.bit1; // FLAG7
         br.uint8; // RESV_6 FLAG8-15
         br.uint8; // RESV_7 FLAG16-23
@@ -29869,14 +29875,14 @@ class JPDecode extends JPBase {
     // #region FINALIZE
     ////////////////////////
     decrypt(br, buffer, finalSize) {
-        const cypter = new Crypt(this.encryptionKey);
+        const cypter = new Crypt(this.encryptionKey, this.useFallback);
         if (!this.useFile) {
             if (buffer == null) {
                 this.throwError("Buffer to decrypt not set. " + this.fileName);
             }
             const decrypted = cypter.decrypt(buffer);
             if (decrypted.length != finalSize) {
-                this.addError(`Decrypted buffer size of ${decrypted.length} instead of ${finalSize} in file ` + this.fileName);
+                this.addError(`useFallback: ${cypter.useFallback} ${cypter.hash}: Decrypted buffer size of ${decrypted.length} instead of ${finalSize} in file ` + this.fileName);
             }
             return decrypted;
         }
@@ -29911,7 +29917,7 @@ class JPDecode extends JPBase {
             }
             br.trim();
             if (br.size != finalSize) {
-                this.addError(`Decrypted buffer size of ${br.size} was expected size of ${finalSize} in file ` + this.fileName);
+                this.addError(`useFallback: ${cypter.useFallback} ${cypter.hash}: Decrypted buffer size of ${br.size} was expected size of ${finalSize} in file ` + this.fileName);
             }
             return Buffer.alloc(0);
         }
@@ -29973,6 +29979,7 @@ class JPEncode extends JPBase {
         this.Crc32 = encodeOptions?.CRC32 ? 1 : 0;
         this.growthIncrement = encodeOptions?.growthIncrement ? encodeOptions.growthIncrement : GROWTHINCREMENT_DEFAULT;
         this.useMSGPK = encodeOptions?.msgpack ? 1 : 0;
+        this.useFallback = encodeOptions?.useFallback ? encodeOptions.useFallback : false;
     }
     ;
     clone() {
@@ -29990,7 +29997,8 @@ class JPEncode extends JPBase {
             stripKeys: this.KeyStripped,
             CRC32: this.Crc32,
             growthIncrement: this.growthIncrement,
-            msgpack: this.useMSGPK
+            msgpack: this.useMSGPK,
+            useFallback: this.useFallback
         });
         clone.fileName = this.fileName;
         clone.useFile = this.useFile;
@@ -30050,7 +30058,7 @@ class JPEncode extends JPBase {
                     this.DATA_SIZE = BigInt(data.length);
                 }
                 if (this.Encrypted) {
-                    const cypter = new Crypt(this.encryptionKey == 0 ? undefined : this.encryptionKey);
+                    const cypter = new Crypt(this.encryptionKey == 0 ? undefined : this.encryptionKey, this.useFallback);
                     this.encryptionKey = cypter.key;
                     data = cypter.encrypt(data);
                 }
@@ -31020,7 +31028,7 @@ class JPEncode extends JPBase {
         if (this.compWriter == null) {
             this.throwError("Writer not created for encryption. " + this.fileName);
         }
-        const cypter = new Crypt(Encryptionkey);
+        const cypter = new Crypt(Encryptionkey, this.useFallback);
         this.encryptionKey = cypter.key;
         const cryptBuffer = cypter.encrypt(this.compWriter.data);
         this.compWriter.gotoStart();
@@ -31301,10 +31309,6 @@ class JPDecodeAsync extends JPBaseAsync {
      */
     CRC32OnFile = 0;
     /**
-     * uses msgpack data
-     */
-    useMSGPK = 0;
-    /**
      * Set up with basic options.
      *
      * @param {DecoderOptions?} options - options for decoding
@@ -31317,6 +31321,7 @@ class JPDecodeAsync extends JPBaseAsync {
         this.encryptionKey = options?.encryptionKey ? options.encryptionKey : 0;
         this.enforceBigInt = options?.enforceBigInt ? options.enforceBigInt : false;
         this.makeJSON = options?.makeJSON ? options.makeJSON : false;
+        this.useFallback = options?.useFallback ? options.useFallback : false;
     }
     ;
     clone() {
@@ -31330,6 +31335,7 @@ class JPDecodeAsync extends JPBaseAsync {
             encryptionKey: this.encryptionKey,
             enforceBigInt: this.enforceBigInt,
             makeJSON: this.makeJSON,
+            useFallback: this.useFallback
         });
         clone.fileName = this.fileName;
         // TODO may need more
@@ -31359,7 +31365,7 @@ class JPDecodeAsync extends JPBaseAsync {
         }
         try {
             this.entered = true;
-            if (this.useMSGPK) {
+            if (this.MSGPACK) {
                 var compData = this.buffer.subarray(this.HEADER_SIZE, this.buffer.length);
                 if (this.Encrypted) {
                     var finalSize = 0;
@@ -31428,7 +31434,7 @@ class JPDecodeAsync extends JPBaseAsync {
             var biTest = new BiReaderAsync(bytes, { enforceBigInt: this.enforceBigInt });
             await this.testHeader(biTest);
             biTest.close();
-            if (!this.LargeFile || this.useMSGPK) {
+            if (!this.LargeFile || this.MSGPACK) {
                 this.buffer = await fsp.readFile(filePath);
             }
         }
@@ -31455,7 +31461,7 @@ class JPDecodeAsync extends JPBaseAsync {
         this.Encrypted = await br.bit1();
         this.EncryptionExcluded = await br.bit1();
         this.KeyStripped = await br.bit1();
-        this.useMSGPK = await br.bit1();
+        this.MSGPACK = await br.bit1();
         await br.bit1(); // FLAG7
         await br.uint8(); // RESV_6 FLAG8-15
         await br.uint8(); // RESV_7 FLAG16-23
@@ -32295,14 +32301,14 @@ class JPDecodeAsync extends JPBaseAsync {
     // FINALIZE //
     //////////////
     async decrypt(br, buffer, finalSize) {
-        const cypter = new Crypt(this.encryptionKey);
+        const cypter = new Crypt(this.encryptionKey, this.useFallback);
         if (!this.useFile) {
             if (buffer == null) {
                 this.throwError("Buffer to decrypt not set. " + this.fileName);
             }
             const decrypted = cypter.decrypt(buffer);
             if (decrypted.length != finalSize) {
-                this.addError(`Decrypted buffer size of ${decrypted.length} instead of ${finalSize} in file ` + this.fileName);
+                this.addError(`useFallback: ${cypter.useFallback} ${cypter.hash}: Decrypted buffer size of ${decrypted.length} instead of ${finalSize} in file ` + this.fileName);
             }
             return decrypted;
         }
@@ -32337,7 +32343,7 @@ class JPDecodeAsync extends JPBaseAsync {
             }
             await br.trim();
             if (br.size != finalSize) {
-                this.addError(`Decrypted buffer size of ${br.size} was expected size of ${finalSize} in file ` + this.fileName);
+                this.addError(`useFallback: ${cypter.useFallback} ${cypter.hash}: Decrypted buffer size of ${br.size} was expected size of ${finalSize} in file ` + this.fileName);
             }
             return Buffer.alloc(0);
         }
@@ -32399,6 +32405,7 @@ class JPEncodeAsync extends JPBaseAsync {
         this.Crc32 = encodeOptions?.CRC32 ? 1 : 0;
         this.growthIncrement = encodeOptions?.growthIncrement ? encodeOptions.growthIncrement : GROWTHINCREMENT_DEFAULT;
         this.useMSGPK = encodeOptions?.msgpack ? 1 : 0;
+        this.useFallback = encodeOptions?.useFallback ? encodeOptions.useFallback : false;
     }
     ;
     clone() {
@@ -32416,7 +32423,8 @@ class JPEncodeAsync extends JPBaseAsync {
             stripKeys: this.KeyStripped,
             CRC32: this.Crc32,
             growthIncrement: this.growthIncrement,
-            msgpack: this.useMSGPK
+            msgpack: this.useMSGPK,
+            useFallback: this.useFallback
         });
         clone.fileName = this.fileName;
         clone.useFile = this.useFile;
@@ -32477,7 +32485,7 @@ class JPEncodeAsync extends JPBaseAsync {
                     this.DATA_SIZE = BigInt(data.length);
                 }
                 if (this.Encrypted) {
-                    const cypter = new Crypt(this.encryptionKey == 0 ? undefined : this.encryptionKey);
+                    const cypter = new Crypt(this.encryptionKey == 0 ? undefined : this.encryptionKey, this.useFallback);
                     this.encryptionKey = cypter.key;
                     data = cypter.encrypt(data);
                 }
@@ -33456,7 +33464,7 @@ class JPEncodeAsync extends JPBaseAsync {
         if (this.compWriterAsync == null) {
             this.throwError("Writer not created for encryption. " + this.fileName);
         }
-        const cypter = new Crypt(Encryptionkey);
+        const cypter = new Crypt(Encryptionkey, this.useFallback);
         this.encryptionKey = cypter.key;
         const srcData = await this.compWriterAsync.getData();
         const cryptBuffer = cypter.encrypt(srcData);

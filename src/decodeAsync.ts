@@ -380,11 +380,6 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
     CRC32OnFile = 0;
 
     /**
-     * uses msgpack data
-     */
-    useMSGPK = 0;
-
-    /**
      * Set up with basic options.
      * 
      * @param {DecoderOptions?} options - options for decoding
@@ -403,6 +398,8 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
         this.enforceBigInt = options?.enforceBigInt ? options.enforceBigInt : false;
 
         this.makeJSON = options?.makeJSON ? options.makeJSON : false;
+
+        this.useFallback = options?.useFallback ? options.useFallback : false;
     };
 
     private clone(): JPDecodeAsync<ContextType> {
@@ -421,6 +418,8 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
             enforceBigInt: this.enforceBigInt,
 
             makeJSON: this.makeJSON,
+
+            useFallback: this.useFallback
         });
 
         clone.fileName = this.fileName;
@@ -455,7 +454,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
         try {
             this.entered = true;
 
-            if(this.useMSGPK){
+            if(this.MSGPACK){
                 var compData = this.buffer.subarray(this.HEADER_SIZE, this.buffer.length);
 
                 if (this.Encrypted) {
@@ -549,7 +548,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
 
             biTest.close();
 
-            if(!this.LargeFile || this.useMSGPK){
+            if(!this.LargeFile || this.MSGPACK){
                 this.buffer = await fsp.readFile(filePath);
             }
         } else {
@@ -588,7 +587,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
 
         this.KeyStripped = await br.bit1() as bit;
 
-        this.useMSGPK = await br.bit1() as bit;
+        this.MSGPACK = await br.bit1() as bit;
 
         await br.bit1();  // FLAG7
 
@@ -1638,7 +1637,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
     //////////////
 
     private async decrypt(br?: BiWriterAsync<any, any>, buffer?:Buffer, finalSize?: number) {
-        const cypter = new Crypt(this.encryptionKey);
+        const cypter = new Crypt(this.encryptionKey, this.useFallback);
 
         if (!this.useFile) {
             if(buffer == null){
@@ -1648,7 +1647,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
             const decrypted = cypter.decrypt(buffer);
 
             if(decrypted.length != finalSize){
-                this.addError(`Decrypted buffer size of ${decrypted.length} instead of ${finalSize} in file ` + this.fileName);
+                this.addError(`useFallback: ${cypter.useFallback} ${cypter.hash}: Decrypted buffer size of ${decrypted.length} instead of ${finalSize} in file ` + this.fileName);
             }
 
             return decrypted;
@@ -1700,7 +1699,7 @@ export class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
             await br.trim();
 
             if(br.size != finalSize){
-                this.addError(`Decrypted buffer size of ${br.size} was expected size of ${finalSize} in file ` + this.fileName);
+                this.addError(`useFallback: ${cypter.useFallback} ${cypter.hash}: Decrypted buffer size of ${br.size} was expected size of ${finalSize} in file ` + this.fileName);
             }
 
             return Buffer.alloc(0);

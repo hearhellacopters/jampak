@@ -92,7 +92,7 @@ export class Crypt {
 
     fallback: AES | ARIA | CAMELLIA | null = null;
 
-    constructor(key?: number) {
+    constructor(key?: number, useFallback?: boolean) {
         if (key == 0 || key == undefined) {
             const rng = new RandomXorShift();
 
@@ -126,6 +126,10 @@ export class Crypt {
         this.hash = this.hashArray[hash % this.hashArray.length];
 
         if((ciphers.findIndex((x) => x === this.hash) == -1)){
+            this.useFallback = true;
+        }
+
+        if(useFallback){
             this.useFallback = true;
         }
 
@@ -323,6 +327,9 @@ function removePKCSPadding(buffer: Buffer, number: number, PKCS: boolean | numbe
     if (PKCS == true) {
         if(lastByte < 1 || lastByte > 17){
             return buffer;
+        }
+        if(lastByte == 16){
+            return Buffer.alloc(0);
         }
         var len = buffer.length;
         var removed = 0;

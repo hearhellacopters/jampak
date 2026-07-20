@@ -378,11 +378,6 @@ export class JPDecode<ContextType = undefined> extends JPBase {
     CRC32OnFile = 0;
 
     /**
-     * uses msgpack data
-     */
-    useMSGPK = 0;
-
-    /**
      * Set up with basic options.
      * 
      * @param {DecoderOptions?} options - options for decoding
@@ -401,6 +396,8 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         this.enforceBigInt = options?.enforceBigInt ? options.enforceBigInt : false;
 
         this.makeJSON = options?.makeJSON ? options.makeJSON : false;
+
+        this.useFallback = options?.useFallback ? options.useFallback : false;
     };
 
     private clone(): JPDecode<ContextType> {
@@ -419,6 +416,8 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             enforceBigInt: this.enforceBigInt,
 
             makeJSON: this.makeJSON,
+
+            useFallback: this.useFallback
         });
 
         clone.fileName = this.fileName;
@@ -453,7 +452,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
         try {
             this.entered = true;
 
-            if(this.useMSGPK){
+            if(this.MSGPACK){
                 var compData = this.buffer.subarray(this.HEADER_SIZE, this.buffer.length);
 
                 if (this.Encrypted) {
@@ -550,7 +549,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
         biTest.close();
 
-        if(!this.useFile || this.useMSGPK){
+        if(!this.useFile || this.MSGPACK){
             this.buffer = fs.readFileSync(filePath);
         }
     };
@@ -584,7 +583,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
 
         this.KeyStripped = br.bit1 as bit;
 
-        this.useMSGPK = br.bit1 as bit;
+        this.MSGPACK = br.bit1 as bit;
 
         br.bit1;  // FLAG7
 
@@ -1599,7 +1598,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
     ////////////////////////
 
     private decrypt(br?: BiWriter<any, any>, buffer?:Buffer, finalSize?: number) {
-        const cypter = new Crypt(this.encryptionKey);
+        const cypter = new Crypt(this.encryptionKey, this.useFallback);
 
         if (!this.useFile) {
             if(buffer == null){
@@ -1609,7 +1608,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             const decrypted = cypter.decrypt(buffer);
 
             if(decrypted.length != finalSize){
-                this.addError(`Decrypted buffer size of ${decrypted.length} instead of ${finalSize} in file ` + this.fileName);
+                this.addError(`useFallback: ${cypter.useFallback} ${cypter.hash}: Decrypted buffer size of ${decrypted.length} instead of ${finalSize} in file ` + this.fileName);
             }
 
             return decrypted;
@@ -1661,7 +1660,7 @@ export class JPDecode<ContextType = undefined> extends JPBase {
             br.trim();
 
             if(br.size != finalSize){
-                this.addError(`Decrypted buffer size of ${br.size} was expected size of ${finalSize} in file ` + this.fileName);
+                this.addError(`useFallback: ${cypter.useFallback} ${cypter.hash}: Decrypted buffer size of ${br.size} was expected size of ${finalSize} in file ` + this.fileName);
             }
 
             return Buffer.alloc(0);

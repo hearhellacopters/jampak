@@ -104,6 +104,8 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
         this.growthIncrement = encodeOptions?.growthIncrement ? encodeOptions.growthIncrement : GROWTHINCREMENT_DEFAULT;
 
         this.useMSGPK = encodeOptions?.msgpack ? 1: 0;
+
+        this.useFallback = encodeOptions?.useFallback ? encodeOptions.useFallback : false;
     };
 
     private clone(): JPEncodeAsync<ContextType> {
@@ -131,7 +133,9 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
 
             growthIncrement: this.growthIncrement,
 
-            msgpack: this.useMSGPK
+            msgpack: this.useMSGPK,
+
+            useFallback: this.useFallback
         });
 
         clone.fileName = this.fileName;
@@ -224,7 +228,7 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
                 }
 
                 if (this.Encrypted) {
-                    const cypter = new Crypt(this.encryptionKey == 0 ? undefined : this.encryptionKey);
+                    const cypter = new Crypt(this.encryptionKey == 0 ? undefined : this.encryptionKey, this.useFallback);
                     
                     this.encryptionKey = cypter.key;
 
@@ -1397,7 +1401,7 @@ export class JPEncodeAsync<ContextType = undefined> extends JPBaseAsync {
             this.throwError("Writer not created for encryption. " + this.fileName);
         }
 
-        const cypter = new Crypt(Encryptionkey);
+        const cypter = new Crypt(Encryptionkey, this.useFallback);
 
         this.encryptionKey = cypter.key;
 

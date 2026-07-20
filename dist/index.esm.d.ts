@@ -472,10 +472,6 @@ declare class JPDecodeAsync<ContextType = undefined> extends JPBaseAsync {
      */
     CRC32OnFile: number;
     /**
-     * uses msgpack data
-     */
-    useMSGPK: number;
-    /**
      * Set up with basic options.
      *
      * @param {DecoderOptions?} options - options for decoding
@@ -840,6 +836,10 @@ type DecoderOptions<ContextType = undefined> = Readonly<Partial<{
      * This will mostly suppress / convert all extention types that aren't valid JSON.
      */
     makeJSON?: boolean;
+    /**
+     * Fallback encryption
+     */
+    useFallback?: boolean;
 }>> & ContextOf<ContextType>;
 /**
  * Options for `JPEncode`
@@ -921,6 +921,10 @@ type EncoderOptions<ContextType = undefined> = Partial<Readonly<{
      * Faster but limits the amount of data that you can store.
      */
     msgpack?: boolean;
+    /**
+     * Fallback encryption
+     */
+    useFallback?: boolean;
 }>> & ContextOf<ContextType>;
 declare class JPBase {
     /**
@@ -1105,6 +1109,7 @@ declare class JPBase {
      * This array MUST be passed to decoder for the file to be decoded.
      */
     keysArray: string[];
+    useFallback: boolean;
     entered: boolean;
     fileName: string;
     errored: boolean;
@@ -1295,6 +1300,7 @@ declare class JPBaseAsync {
      * This array MUST be passed to decoder for the file to be decoded.
      */
     keysArray: string[];
+    useFallback: boolean;
     entered: boolean;
     fileName: string;
     errored: boolean;
@@ -1352,10 +1358,6 @@ declare class JPDecode<ContextType = undefined> extends JPBase {
      * CRC32 Hash on file.
      */
     CRC32OnFile: number;
-    /**
-     * uses msgpack data
-     */
-    useMSGPK: number;
     /**
      * Set up with basic options.
      *

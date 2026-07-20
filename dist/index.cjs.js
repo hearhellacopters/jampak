@@ -27514,7 +27514,7 @@ class JPExtensionCodec {
 }
 JPExtensionCodec.defaultCodec = new JPExtensionCodec();
 
-var version = "1.0.9";
+var version = "1.0.10";
 var pak = {
 	version: version};
 

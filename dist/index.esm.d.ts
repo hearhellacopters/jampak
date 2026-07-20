@@ -920,7 +920,7 @@ type EncoderOptions<ContextType = undefined> = Partial<Readonly<{
      *
      * Faster but limits the amount of data that you can store.
      */
-    msgpack: boolean;
+    msgpack?: boolean;
 }>> & ContextOf<ContextType>;
 declare class JPBase {
     /**

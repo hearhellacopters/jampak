@@ -835,7 +835,7 @@ export type EncoderOptions<ContextType = undefined> = Partial<
          * 
          * Faster but limits the amount of data that you can store.
          */
-        msgpack: boolean;
+        msgpack?: boolean;
     }>
 > &
     ContextOf<ContextType>;
